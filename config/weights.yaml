@@ -1,0 +1,44 @@
+# Stuck-demand score: which signals, how they're measured, how much they count.
+#
+# Each signal is percentile-ranked across scorable primary substations
+# (0 = least stuck, 1 = most stuck), then combined as a weighted sum and
+# scaled to 0-100. A site missing a signal is scored on the signals it has,
+# with weights re-normalised, and the gap is flagged.
+#
+# direction: high = a bigger value means more stuck; low = a smaller value does.
+
+signals:
+  queue_pressure:
+    weight: 30
+    column: queue_mw
+    direction: high
+    label: Queue pressure
+    description: Demand MW offered and not yet connected.
+
+  headroom_tightness:
+    weight: 25
+    column: demand_headroom_mw
+    direction: low
+    label: Headroom tightness
+    description: Published demand headroom today (MW). Less headroom = tighter.
+
+  utilisation:
+    weight: 15
+    column: utilisation
+    direction: high
+    label: Utilisation
+    description: Observed peak demand / firm capacity.
+
+  recent_activity:
+    weight: 15
+    column: connections_last_year
+    direction: high
+    label: Recent activity
+    description: Demand connection offers accepted in the past year.
+
+  future_squeeze:
+    weight: 15
+    column: headroom_2030_mw
+    direction: low
+    label: Future squeeze
+    description: Forecast 2030 demand headroom (MW, DFES default scenario).

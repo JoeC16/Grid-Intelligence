@@ -26,10 +26,10 @@ Scoring unit = **primary substation** (the capacity heatmap's substation list), 
 - [x] Tests for normalise.py with a small fixture.
 - Done when: one sites table, one row per primary substation, all signal columns filled or flagged.
 
-## Phase 3 — Score (Day 4)
-- [ ] config/weights.yaml: queue pressure 30, headroom tightness 25, utilisation 15, recent activity 15, future squeeze 15.
-- [ ] score.py: percentile-rank each signal across UKPN primaries, weighted sum, 0–100. Score on available signals, flag missing.
-- [ ] Unit tests with a 5-row fixture.
+## Phase 3 — Score (Day 4) ✅
+- [x] config/weights.yaml: queue pressure 30, headroom tightness 25, utilisation 15, recent activity 15, future squeeze 15.
+- [x] score.py: percentile-rank each signal across UKPN primaries, weighted sum, 0–100. Score on available signals, flag missing.
+- [x] Unit tests with a 5-row fixture.
 - Done when: top 20 printed and plausible.
 
 ## Phase 4 — Map (Days 5–6)

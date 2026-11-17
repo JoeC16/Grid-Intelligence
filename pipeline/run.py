@@ -1,4 +1,4 @@
-"""Build data/grid.duckdb in one command.
+"""Build and score data/grid.duckdb in one command.
 
 Usage:
     uv run python -m pipeline.run              # download missing raw data, then build
@@ -16,6 +16,7 @@ import pandas as pd
 from .adapters.base import DNOAdapter
 from .adapters.ukpn import UKPNAdapter
 from .normalise import build_all
+from .score import load_signals, print_top, score, write_scores
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "grid.duckdb"
 
@@ -36,6 +37,8 @@ def build(adapters: list[DNOAdapter], db_path: Path = DB_PATH, refresh: bool = F
             con.register("_df", df)
             con.execute(f"CREATE OR REPLACE TABLE {name} AS SELECT * FROM _df")
             con.unregister("_df")
+        signals = load_signals()
+        write_scores(con, score(combined["sites"], signals), signals)
     return combined
 
 
@@ -60,6 +63,9 @@ def main() -> None:
     parser.add_argument("--refresh", action="store_true", help="re-download all raw datasets")
     args = parser.parse_args()
     summary(build(ADAPTERS, refresh=args.refresh))
+    print("\nTop 20 by stuck-demand score:")
+    with duckdb.connect(str(DB_PATH), read_only=True) as con:
+        print_top(con)
 
 
 if __name__ == "__main__":

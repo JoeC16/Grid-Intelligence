@@ -7,13 +7,16 @@ Map of UK distribution substations scored by "stuck demand": where demand is que
 ```bash
 uv sync
 export UKPN_API_KEY=...            # or put it in a local .env (never committed)
-uv run python -m pipeline.run            # download missing raw data, build data/grid.duckdb
+uv run python -m pipeline.run            # download missing raw data, build + score data/grid.duckdb
+uv run python -m pipeline.score          # re-score only (after editing config/weights.yaml)
 uv run python -m pipeline.run --refresh  # re-download everything first
 uv run python -m pipeline.profile_raw    # regenerate docs/PROFILE.md
 uv run pytest
 ```
 
-`data/grid.duckdb` tables: `sites` (one row per primary substation), `gsps` (primaries rolled up to GSP, plus grid-level queue and large demand), `headroom_scenarios` (DFES headroom, all scenarios and years), `large_demand`, `field_sources` (dataset ID + publish date for every field).
+`data/grid.duckdb` tables: `sites` (one row per primary substation), `gsps` (primaries rolled up to GSP, plus grid-level queue and large demand), `headroom_scenarios` (DFES headroom, all scenarios and years), `large_demand`, `field_sources` (dataset ID + publish date for every field), `site_scores` (0–100 stuck-demand score, rank and per-signal percentiles), `score_weights`.
+
+Scoring: each signal in `config/weights.yaml` is percentile-ranked across scorable primaries (1 = most stuck), then weighted and scaled to 0–100. Sites missing a signal are scored on the rest with weights re-normalised, and the gap is listed in `score_missing`.
 
 See [docs/PROFILE.md](docs/PROFILE.md) for every dataset's columns, quirks, and how the joins work.
 
