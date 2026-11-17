@@ -14,7 +14,10 @@ client = TestClient(app)
 def test_meta():
     m = client.get("/meta").json()
     assert m["licence_areas"] == ["EPN", "LPN", "SPN"]
-    assert sum(w["weight"] for w in m["weights"]) == 100
+    views = {v["key"]: v for v in m["views"]}
+    assert sum(views["investor"]["weights"].values()) == 100
+    assert views["developer"]["invert"] is True
+    assert len(m["signals"]) == 5
     assert "published headroom" in m["disclaimer"].lower()
 
 
@@ -39,6 +42,13 @@ def test_site_detail_every_number_has_a_source():
     assert d["capacity"]["source"]["dataset_id"]
     assert d["headroom_2030"]["source"]["dataset_id"]
     assert sum(v["default"] for v in d["headroom_2030"]["values"]) == 1
+
+
+def test_sites_carry_percentiles_and_both_scores():
+    f = client.get("/sites").json()["features"][0]["properties"]
+    for k in ["pct_queue_pressure", "pct_headroom_tightness", "pct_utilisation",
+              "pct_recent_activity", "pct_future_squeeze", "developer_score", "developer_rank"]:
+        assert k in f
 
 
 def test_unknown_site_404():

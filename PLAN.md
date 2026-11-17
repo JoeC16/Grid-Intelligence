@@ -37,9 +37,9 @@ Scoring unit = **primary substation** (the capacity heatmap's substation list), 
 - [x] React + Vite + TS + MapLibre + Tailwind: substations coloured by score, filter bar (licence area, voltage, min score), side panel with every signal and its source link.
 - Done when: fast and clickable around London.
 
-## Phase 5 — Lenses and sliders (Day 7)
-- [ ] Toggle: Investor view (score) vs Developer view (inverted headroom and queue).
-- [ ] Weight sliders that re-rank live.
+## Phase 5 — Lenses and sliders (Day 7) ✅
+- [x] Toggle: Investor view (score) vs Developer view (inverted headroom and queue).
+- [x] Weight sliders that re-rank live.
 
 ## Phase 6 — AI ask box (Days 8–9)
 - [ ] /query endpoint using the Claude API with tools search_sites(filters) and get_site(id). Returns ranked sites plus a plain-English why. Only numbers from tools.

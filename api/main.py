@@ -21,6 +21,8 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from pipeline.score import load_config
+
 DB_PATH = Path(os.getenv("GRID_DB", Path(__file__).resolve().parent.parent / "data" / "grid.duckdb"))
 
 DISCLAIMER = (
@@ -57,9 +59,8 @@ def _load() -> dict[str, pd.DataFrame]:
     with duckdb.connect(str(DB_PATH), read_only=True) as con:
         sites = con.execute(
             """
-            SELECT t.*, s.score, s.rank, s.signals_used, s.score_missing, s.utilisation,
-                   s.pct_queue_pressure, s.pct_headroom_tightness, s.pct_utilisation,
-                   s.pct_recent_activity, s.pct_future_squeeze
+            SELECT t.*, s.* EXCLUDE (site_id, queue_mw, demand_headroom_mw,
+                                     connections_last_year, headroom_2030_mw)
             FROM sites t LEFT JOIN site_scores s USING (site_id)
             """
         ).df()
@@ -71,8 +72,11 @@ def _load() -> dict[str, pd.DataFrame]:
         }
 
 
-def _clean(v: Any) -> Any:
-    """JSON-safe scalar: NaN/NA -> None, numpy -> python."""
+PCT_COLS = [f"pct_{k}" for k in SIGNAL_DISPLAY]
+
+
+def _clean(v: Any, digits: int | None = 3) -> Any:
+    """JSON-safe scalar: NaN/NA -> None, numpy -> python, floats rounded."""
     if v is None:
         return None
     try:
@@ -83,7 +87,9 @@ def _clean(v: Any) -> Any:
     if hasattr(v, "item"):
         v = v.item()
     if isinstance(v, float):
-        return None if math.isnan(v) else round(v, 3)
+        if math.isnan(v):
+            return None
+        return v if digits is None else round(v, digits)
     return v
 
 
@@ -115,14 +121,31 @@ def _source(dno: str, field: str) -> dict | None:
 def meta() -> dict:
     data = _load()
     sites = data["sites"]
-    weights = data["weights"].to_dict("records")
+    signals, views = load_config()
+    stored = data["weights"]  # weights the stored scores were computed with
     return {
         "disclaimer": DISCLAIMER,
         "licence_areas": sorted(sites["licence_area"].dropna().unique().tolist()),
         "voltages": sorted(float(v) for v in sites["voltage"].dropna().unique()),
         "site_count": int(len(sites)),
         "scored_count": int(sites["score"].notna().sum()),
-        "weights": [{k: _clean(v) for k, v in w.items()} for w in weights],
+        "signals": [
+            {"key": sg.key, "label": sg.label, "description": sg.description, "direction": sg.direction}
+            for sg in signals
+        ],
+        "views": [
+            {
+                "key": v.key,
+                "label": v.label,
+                "score_label": v.score_label,
+                "description": v.description,
+                "invert": v.invert,
+                "weights": {
+                    r["key"]: _clean(r["weight"]) for r in stored[stored["view"] == v.key].to_dict("records")
+                } or v.weights,
+            }
+            for v in views
+        ],
         "headroom_2030_scenario": _clean(sites["headroom_2030_scenario"].iloc[0]),
         "sources": [{k: _clean(v) for k, v in r.items()} for r in data["sources"].to_dict("records")],
     }
@@ -150,13 +173,14 @@ def list_sites(
         df = df[df["score"].notna()]
 
     props = ["site_id", "name", "licence_area", "voltage", "gsp", "score", "rank",
-             "queue_mw", "demand_headroom_mw"]
+             "developer_score", "developer_rank", "queue_mw", "demand_headroom_mw", *PCT_COLS]
     features = [
         {
             "type": "Feature",
             "id": i,
             "geometry": {"type": "Point", "coordinates": [round(r["lon"], 6), round(r["lat"], 6)]},
-            "properties": {k: _clean(r[k]) for k in props},
+            # percentiles unrounded so the browser re-scores exactly like the pipeline
+            "properties": {k: _clean(r[k], None if k in PCT_COLS else 3) for k in props},
         }
         for i, r in enumerate(df[props + ["lat", "lon"]].to_dict("records"))
     ]
@@ -173,7 +197,8 @@ def get_site(site_id: str) -> dict:
     s = _row(match)
     dno = s["dno"]
     _, by_dataset = _sources()
-    weights = {w["key"]: w for w in data["weights"].to_dict("records")}
+    w_inv = data["weights"][data["weights"]["view"] == "investor"]
+    weights = {w["key"]: w for w in w_inv.to_dict("records")}
 
     signals = []
     for key, disp in SIGNAL_DISPLAY.items():
@@ -244,6 +269,8 @@ def get_site(site_id: str) -> dict:
         "score": s["score"],
         "rank": s["rank"],
         "rank_of": int(sites["score"].notna().sum()),
+        "developer_score": s.get("developer_score"),
+        "developer_rank": s.get("developer_rank"),
         "scorable": s["scorable"],
         "exclude_reason": s["exclude_reason"],
         "score_missing": s["score_missing"],

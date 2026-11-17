@@ -8,12 +8,20 @@ export interface Source {
   url: string;
 }
 
-export interface Weight {
+export interface SignalMeta {
   key: string;
-  weight: number;
-  column: string;
-  direction: "high" | "low";
   label: string;
+  description: string;
+  direction: "high" | "low";
+}
+
+export interface ViewMeta {
+  key: string;
+  label: string;
+  score_label: string;
+  description: string;
+  invert: boolean;
+  weights: Record<string, number>;
 }
 
 export interface Meta {
@@ -22,7 +30,8 @@ export interface Meta {
   voltages: number[];
   site_count: number;
   scored_count: number;
-  weights: Weight[];
+  signals: SignalMeta[];
+  views: ViewMeta[];
   headroom_2030_scenario: string;
   sources: (Source & { dno: string; field: string })[];
 }
@@ -35,8 +44,15 @@ export interface SiteProps {
   gsp: string | null;
   score: number | null;
   rank: number | null;
+  developer_score: number | null;
+  developer_rank: number | null;
   queue_mw: number | null;
   demand_headroom_mw: number | null;
+  pct_queue_pressure: number | null;
+  pct_headroom_tightness: number | null;
+  pct_utilisation: number | null;
+  pct_recent_activity: number | null;
+  pct_future_squeeze: number | null;
 }
 
 export interface SitesGeoJSON {
@@ -73,6 +89,8 @@ export interface SiteDetail {
   score: number | null;
   rank: number | null;
   rank_of: number;
+  developer_score: number | null;
+  developer_rank: number | null;
   scorable: boolean;
   exclude_reason: string | null;
   score_missing: string | null;

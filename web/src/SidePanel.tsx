@@ -1,8 +1,16 @@
-import type { Signal, SiteDetail, Source } from "./api";
-import { scoreColor } from "./colors";
+import type { Signal, SiteDetail, Source, ViewMeta } from "./api";
+import { scoreColor, type Ramp } from "./colors";
+import type { Weights } from "./scoring";
 
 interface Props {
   site: SiteDetail | null;
+  view: ViewMeta;
+  weights: Weights;
+  live: { score: number | null; rank: number | null } | null;
+  rankOf: number;
+  ramp: Ramp;
+  colocated: { site_id: string; name: string; score: number | null }[];
+  onSelect: (id: string) => void;
   loading: boolean;
   error: string | null;
   onClose: () => void;
@@ -35,7 +43,8 @@ function PercentileBar({ value }: { value: number | null }) {
   );
 }
 
-function SignalRow({ s }: { s: Signal }) {
+function SignalRow({ s, invert, weight }: { s: Signal; invert: boolean; weight: number }) {
+  const pct = s.percentile == null ? null : invert ? 1 - s.percentile : s.percentile;
   return (
     <li className="py-3">
       <div className="flex items-baseline justify-between gap-3">
@@ -45,9 +54,9 @@ function SignalRow({ s }: { s: Signal }) {
         </span>
       </div>
       <div className="mt-1.5 flex items-center gap-3">
-        <PercentileBar value={s.percentile} />
+        <PercentileBar value={pct} />
         <span className="w-24 shrink-0 text-right text-[11px] tabular-nums text-stone-500">
-          {s.percentile == null ? "not ranked" : `${Math.round(s.percentile * 100)}th pct`} · w{s.weight}
+          {pct == null ? "not ranked" : `${Math.round(pct * 100)}th pct`} · w{weight}
         </span>
       </div>
       {s.note && <p className="mt-1 text-[11px] text-stone-500">{s.note}</p>}
@@ -69,7 +78,8 @@ function Row({ label, value, unit }: { label: string; value: number | null; unit
   );
 }
 
-export default function SidePanel({ site, loading, error, onClose }: Props) {
+export default function SidePanel({ site, view, weights, live, rankOf, ramp, colocated, onSelect, loading, error, onClose }: Props) {
+  const score = live?.score ?? null;
   return (
     <aside className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:w-[380px]">
       <div className="flex items-start justify-between border-b border-stone-200 px-5 py-4">
@@ -104,16 +114,16 @@ export default function SidePanel({ site, loading, error, onClose }: Props) {
           <>
             <section className="flex items-center gap-4 py-4">
               <div
-                className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-xl font-semibold text-white"
-                style={{ background: scoreColor(site.score) }}
+                className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-lg font-semibold tabular-nums text-white"
+                style={{ background: scoreColor(score, ramp) }}
               >
-                {site.score == null ? "—" : Math.round(site.score)}
+                {score == null ? "—" : score.toFixed(1)}
               </div>
               <div className="text-sm">
-                <p className="font-medium text-stone-900">Stuck-demand score</p>
+                <p className="font-medium text-stone-900">{view.score_label}</p>
                 {site.score != null ? (
                   <p className="text-stone-500">
-                    Rank {site.rank} of {site.rank_of} UKPN primaries
+                    {score == null ? "No score: all weights are zero" : `Rank ${live?.rank} of ${rankOf} UKPN primaries`}
                   </p>
                 ) : (
                   <p className="text-stone-500">Not scored: {site.exclude_reason}</p>
@@ -124,10 +134,36 @@ export default function SidePanel({ site, loading, error, onClose }: Props) {
               </div>
             </section>
 
+            {colocated.length > 0 && (
+              <div className="mb-4 rounded-md border border-stone-200 p-3 text-xs">
+                <p className="text-stone-500">Also at this location:</p>
+                <ul className="mt-1 space-y-1">
+                  {colocated.map((o) => (
+                    <li key={o.site_id}>
+                      <button
+                        type="button"
+                        onClick={() => onSelect(o.site_id)}
+                        className="flex w-full items-center gap-2 text-left text-stone-800 hover:underline"
+                      >
+                        <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: scoreColor(o.score, ramp) }} />
+                        <span className="flex-1">{o.name}</span>
+                        <span className="tabular-nums text-stone-500">{o.score == null ? "—" : o.score.toFixed(1)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-500">Signals</h3>
+            <p className="mt-1 text-[11px] text-stone-500">
+              {view.invert
+                ? "Bars: how favourable for a new connection vs other UKPN primaries (100 = best)."
+                : "Bars: how stuck vs other UKPN primaries (100 = most stuck)."}
+            </p>
             <ul className="divide-y divide-stone-100">
               {site.signals.map((s) => (
-                <SignalRow key={s.key} s={s} />
+                <SignalRow key={s.key} s={s} invert={view.invert} weight={weights[s.key] ?? 0} />
               ))}
             </ul>
 

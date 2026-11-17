@@ -23,7 +23,12 @@ cd web && npm install && npm run dev        # http://localhost:5173
 
 `data/grid.duckdb` tables: `sites` (one row per primary substation), `gsps` (primaries rolled up to GSP, plus grid-level queue and large demand), `headroom_scenarios` (DFES headroom, all scenarios and years), `large_demand`, `field_sources` (dataset ID + publish date for every field), `site_scores` (0–100 stuck-demand score, rank and per-signal percentiles), `score_weights`.
 
-Scoring: each signal in `config/weights.yaml` is percentile-ranked across scorable primaries (1 = most stuck), then weighted and scaled to 0–100. Sites missing a signal are scored on the rest with weights re-normalised, and the gap is listed in `score_missing`.
+Scoring: each signal in `config/weights.yaml` is percentile-ranked across scorable primaries (1 = most stuck). Each *view* then weights those percentiles and scales to 0–100:
+
+- **Investor** (`score`, `rank`): stuck-demand score, where demand is queuing and published headroom has run out.
+- **Developer** (`developer_score`, `developer_rank`): connection opportunity score. It inverts the percentiles (more published headroom and a shorter queue score higher) and by default weights only headroom and queue.
+
+Sites missing a signal are scored on the rest with weights re-normalised, and the gap is listed in `score_missing`. The web app re-scores in the browser (`web/src/scoring.ts`, which must stay in step with `combine()` in `pipeline/score.py`), so the view toggle and weight sliders re-rank live.
 
 See [docs/PROFILE.md](docs/PROFILE.md) for every dataset's columns, quirks, and how the joins work.
 
