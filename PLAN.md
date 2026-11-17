@@ -32,9 +32,9 @@ Scoring unit = **primary substation** (the capacity heatmap's substation list), 
 - [x] Unit tests with a 5-row fixture.
 - Done when: top 20 printed and plausible.
 
-## Phase 4 — Map (Days 5–6)
-- [ ] FastAPI: /sites (with filters) and /sites/{id}.
-- [ ] React + Vite + TS + MapLibre + Tailwind: substations coloured by score, filter bar (licence area, voltage, min score), side panel with every signal and its source link.
+## Phase 4 — Map (Days 5–6) ✅
+- [x] FastAPI: /sites (with filters) and /sites/{id}.
+- [x] React + Vite + TS + MapLibre + Tailwind: substations coloured by score, filter bar (licence area, voltage, min score), side panel with every signal and its source link.
 - Done when: fast and clickable around London.
 
 ## Phase 5 — Lenses and sliders (Day 7)

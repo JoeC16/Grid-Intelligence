@@ -1,0 +1,260 @@
+"""Grid Intelligence API. Reads data/grid.duckdb (built by `pipeline.run`).
+
+Run:  uv run uvicorn api.main:app --reload
+
+Endpoints
+  GET /meta          filter options, scoring weights, data sources
+  GET /sites         GeoJSON of substations, filterable
+  GET /sites/{id}    every signal for one substation, each with its source
+"""
+
+from __future__ import annotations
+
+import math
+import os
+from functools import lru_cache
+from pathlib import Path
+from typing import Annotated, Any
+
+import duckdb
+import pandas as pd
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+
+DB_PATH = Path(os.getenv("GRID_DB", Path(__file__).resolve().parent.parent / "data" / "grid.duckdb"))
+
+DISCLAIMER = (
+    "Published headroom is indicative firm capacity from the DNO's open data. "
+    "It is not a guarantee of capacity available to connect."
+)
+
+# How each signal is shown. Keys match score_weights.key.
+SIGNAL_DISPLAY = {
+    "queue_pressure": {"field": "queue_mw", "unit": "MW", "label": "Demand queue"},
+    "headroom_tightness": {"field": "demand_headroom_mw", "unit": "MW", "label": "Published headroom"},
+    "utilisation": {"field": "utilisation", "unit": "%", "label": "Utilisation (peak / firm)"},
+    "recent_activity": {"field": "connections_last_year", "unit": "offers", "label": "Demand offers accepted, past year"},
+    "future_squeeze": {"field": "headroom_2030_mw", "unit": "MW", "label": "Published headroom 2030"},
+}
+
+app = FastAPI(title="Grid Intelligence API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
+
+
+# ------------------------------------------------------------------ data --
+
+
+@lru_cache(maxsize=1)
+def _load() -> dict[str, pd.DataFrame]:
+    """The DB is small (~1k sites), so load it once and serve from memory."""
+    if not DB_PATH.exists():
+        raise RuntimeError(f"{DB_PATH} not found. Run `uv run python -m pipeline.run` first.")
+    with duckdb.connect(str(DB_PATH), read_only=True) as con:
+        sites = con.execute(
+            """
+            SELECT t.*, s.score, s.rank, s.signals_used, s.score_missing, s.utilisation,
+                   s.pct_queue_pressure, s.pct_headroom_tightness, s.pct_utilisation,
+                   s.pct_recent_activity, s.pct_future_squeeze
+            FROM sites t LEFT JOIN site_scores s USING (site_id)
+            """
+        ).df()
+        return {
+            "sites": sites,
+            "gsps": con.execute("SELECT * FROM gsps").df(),
+            "weights": con.execute("SELECT * FROM score_weights").df(),
+            "sources": con.execute("SELECT * FROM field_sources").df(),
+        }
+
+
+def _clean(v: Any) -> Any:
+    """JSON-safe scalar: NaN/NA -> None, numpy -> python."""
+    if v is None:
+        return None
+    try:
+        if pd.isna(v):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if hasattr(v, "item"):
+        v = v.item()
+    if isinstance(v, float):
+        return None if math.isnan(v) else round(v, 3)
+    return v
+
+
+def _row(df: pd.DataFrame) -> dict[str, Any]:
+    return {k: _clean(v) for k, v in df.iloc[0].items()}
+
+
+@lru_cache(maxsize=1)
+def _sources() -> tuple[dict[str, dict], dict[str, dict]]:
+    """field -> source, and dataset_id -> source, for one DNO-agnostic lookup."""
+    src = _load()["sources"]
+    by_field = {}
+    by_dataset = {}
+    for r in src.to_dict("records"):
+        s = {"dataset_id": r["dataset_id"], "publish_date": r["publish_date"], "url": r["url"]}
+        by_field[(r["dno"], r["field"])] = s
+        by_dataset[r["dataset_id"]] = s
+    return by_field, by_dataset
+
+
+def _source(dno: str, field: str) -> dict | None:
+    return _sources()[0].get((dno, field))
+
+
+# ------------------------------------------------------------- endpoints --
+
+
+@app.get("/meta")
+def meta() -> dict:
+    data = _load()
+    sites = data["sites"]
+    weights = data["weights"].to_dict("records")
+    return {
+        "disclaimer": DISCLAIMER,
+        "licence_areas": sorted(sites["licence_area"].dropna().unique().tolist()),
+        "voltages": sorted(float(v) for v in sites["voltage"].dropna().unique()),
+        "site_count": int(len(sites)),
+        "scored_count": int(sites["score"].notna().sum()),
+        "weights": [{k: _clean(v) for k, v in w.items()} for w in weights],
+        "headroom_2030_scenario": _clean(sites["headroom_2030_scenario"].iloc[0]),
+        "sources": [{k: _clean(v) for k, v in r.items()} for r in data["sources"].to_dict("records")],
+    }
+
+
+@app.get("/sites")
+def list_sites(
+    licence_area: Annotated[list[str] | None, Query(description="e.g. LPN; repeat for several")] = None,
+    voltage: Annotated[list[float] | None, Query(description="busbar kV, e.g. 11; repeat for several")] = None,
+    min_score: Annotated[float | None, Query(ge=0, le=100)] = None,
+    gsp: str | None = None,
+    include_unscored: bool = True,
+) -> dict:
+    """Substations as a GeoJSON FeatureCollection (light properties for the map)."""
+    df = _load()["sites"]
+    if licence_area:
+        df = df[df["licence_area"].isin([a.upper() for a in licence_area])]
+    if voltage:
+        df = df[df["voltage"].isin(voltage)]
+    if gsp:
+        df = df[df["gsp"].str.upper() == gsp.upper()]
+    if min_score is not None:
+        df = df[df["score"] >= min_score]
+    elif not include_unscored:
+        df = df[df["score"].notna()]
+
+    props = ["site_id", "name", "licence_area", "voltage", "gsp", "score", "rank",
+             "queue_mw", "demand_headroom_mw"]
+    features = [
+        {
+            "type": "Feature",
+            "id": i,
+            "geometry": {"type": "Point", "coordinates": [round(r["lon"], 6), round(r["lat"], 6)]},
+            "properties": {k: _clean(r[k]) for k in props},
+        }
+        for i, r in enumerate(df[props + ["lat", "lon"]].to_dict("records"))
+    ]
+    return {"type": "FeatureCollection", "count": len(features), "features": features}
+
+
+@app.get("/sites/{site_id}")
+def get_site(site_id: str) -> dict:
+    data = _load()
+    sites = data["sites"]
+    match = sites[sites["site_id"] == site_id]
+    if match.empty:
+        raise HTTPException(status_code=404, detail=f"No site {site_id!r}")
+    s = _row(match)
+    dno = s["dno"]
+    _, by_dataset = _sources()
+    weights = {w["key"]: w for w in data["weights"].to_dict("records")}
+
+    signals = []
+    for key, disp in SIGNAL_DISPLAY.items():
+        value = s.get(disp["field"])
+        note = None
+        if key == "utilisation":
+            source = _source(dno, "observed_peak_mw")
+            value = None if value is None else round(100 * value, 1)
+        elif key == "queue_pressure":
+            # queue figure may come from a fallback dataset for this site
+            source = by_dataset.get(s.get("queue_source")) or _source(dno, "queue_mw")
+            if s.get("queue_source") == "none":
+                note = "No demand offers recorded for this substation."
+            elif source and source != _source(dno, "queue_mw"):
+                note = "Not listed in the queue dataset; figure is demand offers from the past year."
+        else:
+            source = _source(dno, disp["field"])
+        w = weights.get(key, {})
+        if value is None:
+            note = "Not published for this substation; scored on the other signals."
+        signals.append({
+            "key": key,
+            "label": disp["label"],
+            "value": value,
+            "unit": disp["unit"],
+            "percentile": s.get(f"pct_{key}"),
+            "weight": _clean(w.get("weight")),
+            "source": source,
+            "note": note,
+        })
+
+    scenarios = sorted(k for k in s if k.startswith("headroom_2030_") and k not in
+                       ("headroom_2030_mw", "headroom_2030_scenario"))
+    headroom_2030 = [
+        {"scenario": k.removeprefix("headroom_2030_").replace("_", " ").title(), "value": s[k],
+         "default": k.removeprefix("headroom_2030_") == s["headroom_2030_scenario"].lower().replace(" ", "_")}
+        for k in scenarios
+    ]
+
+    gsp = None
+    if s.get("gsp"):
+        g = data["gsps"][(data["gsps"]["gsp"] == s["gsp"]) & (data["gsps"]["dno"] == dno)]
+        if not g.empty:
+            row = _row(g)
+            gsp = {
+                "name": row["gsp"],
+                "site_count": row["site_count"],
+                "queue_mw": row["queue_mw"],
+                "primary_queue_mw": row["primary_queue_mw"],
+                "grid_level_queue_mw": row["grid_level_queue_mw"],
+                "large_demand_count": row["large_demand_count"],
+                "large_demand_mva": row["large_demand_mva"],
+                "sources": {
+                    "queue_mw": _source(dno, "grid_level_queue_mw"),
+                    "large_demand": _source(dno, "large_demand"),
+                },
+            }
+
+    return {
+        "site_id": s["site_id"],
+        "dno": dno,
+        "name": s["name"],
+        "lat": s["lat"],
+        "lon": s["lon"],
+        "voltage": s["voltage"],
+        "licence_area": s["licence_area"],
+        "gsp": s["gsp"],
+        "score": s["score"],
+        "rank": s["rank"],
+        "rank_of": int(sites["score"].notna().sum()),
+        "scorable": s["scorable"],
+        "exclude_reason": s["exclude_reason"],
+        "score_missing": s["score_missing"],
+        "signals": signals,
+        "capacity": {
+            "firm_capacity_mw": s["firm_capacity_mw"],
+            "observed_peak_mw": s["observed_peak_mw"],
+            "source": _source(dno, "firm_capacity_mw"),
+        },
+        "headroom_2030": {"values": headroom_2030, "source": _source(dno, "headroom_2030_mw")},
+        "location_source": _source(dno, "lat"),
+        "gsp_context": gsp,
+        "disclaimer": DISCLAIMER,
+    }

@@ -14,6 +14,13 @@ uv run python -m pipeline.profile_raw    # regenerate docs/PROFILE.md
 uv run pytest
 ```
 
+Run the map locally (two terminals):
+
+```bash
+uv run uvicorn api.main:app --port 8000     # API: /meta, /sites, /sites/{id}
+cd web && npm install && npm run dev        # http://localhost:5173
+```
+
 `data/grid.duckdb` tables: `sites` (one row per primary substation), `gsps` (primaries rolled up to GSP, plus grid-level queue and large demand), `headroom_scenarios` (DFES headroom, all scenarios and years), `large_demand`, `field_sources` (dataset ID + publish date for every field), `site_scores` (0–100 stuck-demand score, rank and per-signal percentiles), `score_weights`.
 
 Scoring: each signal in `config/weights.yaml` is percentile-ranked across scorable primaries (1 = most stuck), then weighted and scaled to 0–100. Sites missing a signal are scored on the rest with weights re-normalised, and the gap is listed in `score_missing`.
