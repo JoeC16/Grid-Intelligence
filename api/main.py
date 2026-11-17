@@ -32,7 +32,8 @@ DISCLAIMER = (
 
 # How each signal is shown. Keys match score_weights.key.
 SIGNAL_DISPLAY = {
-    "queue_pressure": {"field": "queue_mw", "unit": "MW", "label": "Demand queue"},
+    "stuck_mw": {"field": "stuck_mw", "unit": "MW", "label": "Stuck demand (queue beyond headroom)"},
+    "oversubscription": {"field": "oversubscription", "unit": "×", "label": "Oversubscription (queue / headroom)"},
     "headroom_tightness": {"field": "demand_headroom_mw", "unit": "MW", "label": "Published headroom"},
     "utilisation": {"field": "utilisation", "unit": "%", "label": "Utilisation (peak / firm)"},
     "recent_activity": {"field": "connections_last_year", "unit": "offers", "label": "Demand offers accepted, past year"},
@@ -117,6 +118,14 @@ def _source(dno: str, field: str) -> dict | None:
 # ------------------------------------------------------------- endpoints --
 
 
+def _view_meta(v, stored: pd.DataFrame) -> dict:
+    base = {"key": v.key, "type": v.type, "label": v.label, "description": v.description}
+    if v.type == "weighted":
+        stored_w = {r["key"]: _clean(r["weight"]) for r in stored[stored["view"] == v.key].to_dict("records")}
+        return {**base, "score_label": v.score_label, "weights": stored_w or v.weights}
+    return {**base, "load_mw_default": v.load_mw_default, "filter_column": v.filter_column, "rank_by": v.rank_by}
+
+
 @app.get("/meta")
 def meta() -> dict:
     data = _load()
@@ -133,19 +142,7 @@ def meta() -> dict:
             {"key": sg.key, "label": sg.label, "description": sg.description, "direction": sg.direction}
             for sg in signals
         ],
-        "views": [
-            {
-                "key": v.key,
-                "label": v.label,
-                "score_label": v.score_label,
-                "description": v.description,
-                "invert": v.invert,
-                "weights": {
-                    r["key"]: _clean(r["weight"]) for r in stored[stored["view"] == v.key].to_dict("records")
-                } or v.weights,
-            }
-            for v in views
-        ],
+        "views": [_view_meta(v, stored) for v in views],
         "headroom_2030_scenario": _clean(sites["headroom_2030_scenario"].iloc[0]),
         "sources": [{k: _clean(v) for k, v in r.items()} for r in data["sources"].to_dict("records")],
     }
@@ -173,7 +170,8 @@ def list_sites(
         df = df[df["score"].notna()]
 
     props = ["site_id", "name", "licence_area", "voltage", "gsp", "score", "rank",
-             "developer_score", "developer_rank", "queue_mw", "demand_headroom_mw", *PCT_COLS]
+             "developer_rank", "queue_mw", "demand_headroom_mw", "headroom_after_queue_mw",
+             "stuck_mw", "oversubscription", *PCT_COLS]
     features = [
         {
             "type": "Feature",
@@ -200,20 +198,26 @@ def get_site(site_id: str) -> dict:
     w_inv = data["weights"][data["weights"]["view"] == "investor"]
     weights = {w["key"]: w for w in w_inv.to_dict("records")}
 
+    # queue figure may come from a fallback dataset for this site
+    queue_source = by_dataset.get(s.get("queue_source")) or _source(dno, "queue_mw")
+    queue_note = None
+    if s.get("queue_source") == "none":
+        queue_note = "No demand offers recorded for this substation."
+    elif queue_source and queue_source != _source(dno, "queue_mw"):
+        queue_note = "Not listed in the queue dataset; figure is demand offers from the past year."
+    headroom_source = _source(dno, "demand_headroom_mw")
+
     signals = []
     for key, disp in SIGNAL_DISPLAY.items():
         value = s.get(disp["field"])
         note = None
+        extra_sources: list[dict] = []
         if key == "utilisation":
             source = _source(dno, "observed_peak_mw")
             value = None if value is None else round(100 * value, 1)
-        elif key == "queue_pressure":
-            # queue figure may come from a fallback dataset for this site
-            source = by_dataset.get(s.get("queue_source")) or _source(dno, "queue_mw")
-            if s.get("queue_source") == "none":
-                note = "No demand offers recorded for this substation."
-            elif source and source != _source(dno, "queue_mw"):
-                note = "Not listed in the queue dataset; figure is demand offers from the past year."
+        elif key in ("stuck_mw", "oversubscription"):
+            # derived from the demand queue and published headroom
+            source, extra_sources = queue_source, [headroom_source]
         else:
             source = _source(dno, disp["field"])
         w = weights.get(key, {})
@@ -227,6 +231,7 @@ def get_site(site_id: str) -> dict:
             "percentile": s.get(f"pct_{key}"),
             "weight": _clean(w.get("weight")),
             "source": source,
+            "extra_sources": [x for x in extra_sources if x],
             "note": note,
         })
 
@@ -269,8 +274,12 @@ def get_site(site_id: str) -> dict:
         "score": s["score"],
         "rank": s["rank"],
         "rank_of": int(sites["score"].notna().sum()),
-        "developer_score": s.get("developer_score"),
-        "developer_rank": s.get("developer_rank"),
+        "queue": {"queue_mw": s.get("queue_mw"), "source": queue_source, "note": queue_note},
+        "developer": {
+            "headroom_after_queue_mw": s.get("headroom_after_queue_mw"),
+            "rank_at_default_load": s.get("developer_rank"),
+            "sources": [x for x in (headroom_source, queue_source) if x],
+        },
         "scorable": s["scorable"],
         "exclude_reason": s["exclude_reason"],
         "score_missing": s["score_missing"],

@@ -17,11 +17,16 @@ export interface SignalMeta {
 
 export interface ViewMeta {
   key: string;
+  type: "weighted" | "filter_rank";
   label: string;
-  score_label: string;
   description: string;
-  invert: boolean;
-  weights: Record<string, number>;
+  // weighted
+  score_label?: string;
+  weights?: Record<string, number>;
+  // filter_rank
+  load_mw_default?: number;
+  filter_column?: string;
+  rank_by?: string;
 }
 
 export interface Meta {
@@ -44,11 +49,14 @@ export interface SiteProps {
   gsp: string | null;
   score: number | null;
   rank: number | null;
-  developer_score: number | null;
   developer_rank: number | null;
   queue_mw: number | null;
   demand_headroom_mw: number | null;
-  pct_queue_pressure: number | null;
+  headroom_after_queue_mw: number | null;
+  stuck_mw: number | null;
+  oversubscription: number | null;
+  pct_stuck_mw: number | null;
+  pct_oversubscription: number | null;
   pct_headroom_tightness: number | null;
   pct_utilisation: number | null;
   pct_recent_activity: number | null;
@@ -74,6 +82,7 @@ export interface Signal {
   percentile: number | null;
   weight: number;
   source: Source | null;
+  extra_sources: Source[];
   note: string | null;
 }
 
@@ -89,8 +98,8 @@ export interface SiteDetail {
   score: number | null;
   rank: number | null;
   rank_of: number;
-  developer_score: number | null;
-  developer_rank: number | null;
+  queue: { queue_mw: number | null; source: Source | null; note: string | null };
+  developer: { headroom_after_queue_mw: number | null; rank_at_default_load: number | null; sources: Source[] };
   scorable: boolean;
   exclude_reason: string | null;
   score_missing: string | null;

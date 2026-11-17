@@ -3,21 +3,21 @@
 import pandas as pd
 import pytest
 
-from pipeline.score import Signal, View, combine, load_config, percentile, score
+from pipeline.score import Signal, View, add_derived, combine, filter_rank, load_config, percentile, score
 
 SIGNALS = [
-    Signal("queue_pressure", "queue_mw", "high", "Queue"),
+    Signal("stuck_mw", "stuck_mw", "high", "Stuck"),
+    Signal("oversubscription", "oversubscription", "high", "Oversub"),
     Signal("headroom_tightness", "demand_headroom_mw", "low", "Headroom"),
     Signal("utilisation", "utilisation", "high", "Utilisation"),
     Signal("recent_activity", "connections_last_year", "high", "Activity"),
     Signal("future_squeeze", "headroom_2030_mw", "low", "2030"),
 ]
-INVESTOR = View("investor", "Investor", "Stuck", False, {
-    "queue_pressure": 30, "headroom_tightness": 25, "utilisation": 15, "recent_activity": 15, "future_squeeze": 15,
-})
-DEVELOPER = View("developer", "Developer", "Opportunity", True, {
-    "queue_pressure": 50, "headroom_tightness": 50, "utilisation": 0, "recent_activity": 0, "future_squeeze": 0,
-})
+WEIGHTS = {"stuck_mw": 25, "oversubscription": 20, "headroom_tightness": 15,
+           "utilisation": 15, "recent_activity": 10, "future_squeeze": 15}
+INVESTOR = View("investor", "weighted", "Investor", score_label="Stuck", weights=WEIGHTS)
+DEVELOPER = View("developer", "filter_rank", "Developer", load_mw_default=5.0,
+                 filter_column="demand_headroom_mw", rank_by="headroom_after_queue_mw")
 VIEWS = [INVESTOR, DEVELOPER]
 
 
@@ -54,16 +54,34 @@ def test_investor_scores_in_range_and_ordered(scored):
     assert scored.loc["A", "rank"] == 1
 
 
-def test_developer_view_inverts_headroom_and_queue(scored):
-    # E has the most headroom and no queue: the best place to connect.
-    assert scored.loc["E", "developer_score"] == 100.0
-    assert scored.loc["E", "developer_rank"] == 1
-    assert scored.loc["A", "developer_score"] == 0.0
-    # With equal weights on two inverted signals, dev score = 100 - those two signals' stuck score.
-    for site in "ABCDE":
-        r = scored.loc[site]
-        assert r["developer_score"] == pytest.approx(
-            100 * (1 - (r.pct_queue_pressure + r.pct_headroom_tightness) / 2), abs=0.05)
+def test_derived_signals(sites):
+    d = add_derived(sites).set_index("site_id")
+    # A: queue 40, headroom -2 -> 42 MW stuck; headroom floored at 1 for the ratio
+    assert d.loc["A", "stuck_mw"] == 42.0
+    assert d.loc["A", "oversubscription"] == 40.0
+    # B: queue 20, headroom 1 -> 19 stuck, 20x
+    assert d.loc["B", "stuck_mw"] == 19.0 and d.loc["B", "oversubscription"] == 20.0
+    # D: queue 5, headroom 8 -> nothing stuck, 0.625x
+    assert d.loc["D", "stuck_mw"] == 0.0
+    assert d.loc["D", "oversubscription"] == pytest.approx(0.625)
+    assert d.loc["E", "headroom_after_queue_mw"] == 20.0
+    assert d.loc["C", "headroom_after_queue_mw"] == -6.0
+
+
+def test_developer_filter_and_rank(scored):
+    # load 5 MW: only D (8 MW) and E (20 MW) have enough published headroom
+    ranked = scored["developer_rank"].dropna()
+    assert set(ranked.index) == {"D", "E"}
+    assert scored.loc["E", "developer_rank"] == 1  # 20 - 0 beats 8 - 5
+    assert scored.loc["D", "developer_rank"] == 2
+    assert pd.isna(scored.loc["A", "developer_rank"])
+
+
+def test_developer_load_size_changes_eligibility(sites):
+    df = add_derived(sites[sites["scorable"]]).set_index("site_id")
+    assert filter_rank(df, DEVELOPER, 10).dropna().index.tolist() == ["E"]
+    assert filter_rank(df, DEVELOPER, 0).dropna().size == 4  # B, C, D, E have headroom >= 0
+    assert filter_rank(df, DEVELOPER, 100).dropna().empty
 
 
 def test_low_direction_inverts(scored):
@@ -79,9 +97,9 @@ def test_utilisation_derived(scored):
 def test_missing_signal_scored_on_rest_and_flagged(scored):
     d = scored.loc["D"]
     assert d["score_missing"] == "utilisation"
-    assert d["signals_used"] == 4
-    expected = 100 * (30 * d.pct_queue_pressure + 25 * d.pct_headroom_tightness
-                      + 15 * d.pct_recent_activity + 15 * d.pct_future_squeeze) / 85
+    assert d["signals_used"] == 5  # of 6
+    expected = 100 * (25 * d.pct_stuck_mw + 20 * d.pct_oversubscription + 15 * d.pct_headroom_tightness
+                      + 10 * d.pct_recent_activity + 15 * d.pct_future_squeeze) / 85
     assert d["score"] == pytest.approx(expected, abs=0.05)
     assert pd.isna(scored.loc["A", "score_missing"])
 
@@ -99,18 +117,16 @@ def test_percentile_keeps_nan():
 def test_combine_custom_weights(scored):
     # Only recent activity counts: B (2 offers) beats C (1).
     only_activity = {s.key: (1 if s.key == "recent_activity" else 0) for s in SIGNALS}
-    s = combine(scored, only_activity, invert=False)
+    s = combine(scored, only_activity)
     assert s["B"] > s["C"]
 
 
 def test_config_loads():
     signals, views = load_config()
     by_key = {v.key: v for v in views}
-    assert [v.key for v in views][0] == "investor"
-    assert by_key["investor"].weights == {
-        "queue_pressure": 30, "headroom_tightness": 25, "utilisation": 15,
-        "recent_activity": 15, "future_squeeze": 15,
-    }
+    assert views[0].key == "investor" and views[0].type == "weighted"
+    assert by_key["investor"].weights == WEIGHTS
     dev = by_key["developer"]
-    assert dev.invert
-    assert {k for k, w in dev.weights.items() if w} == {"queue_pressure", "headroom_tightness"}
+    assert dev.type == "filter_rank"
+    assert dev.load_mw_default == 50
+    assert (dev.filter_column, dev.rank_by) == ("demand_headroom_mw", "headroom_after_queue_mw")

@@ -34,6 +34,12 @@ function SourceLink({ source }: { source: Source | null }) {
   );
 }
 
+function ordinal(n: number): string {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return `${n}th`;
+  return `${n}${({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th"}`;
+}
+
 function PercentileBar({ value }: { value: number | null }) {
   if (value == null) return <div className="h-1.5 w-full rounded-full bg-stone-100" />;
   return (
@@ -43,8 +49,8 @@ function PercentileBar({ value }: { value: number | null }) {
   );
 }
 
-function SignalRow({ s, invert, weight }: { s: Signal; invert: boolean; weight: number }) {
-  const pct = s.percentile == null ? null : invert ? 1 - s.percentile : s.percentile;
+function SignalRow({ s, weight }: { s: Signal; weight: number }) {
+  const pct = s.percentile;
   return (
     <li className="py-3">
       <div className="flex items-baseline justify-between gap-3">
@@ -56,12 +62,17 @@ function SignalRow({ s, invert, weight }: { s: Signal; invert: boolean; weight: 
       <div className="mt-1.5 flex items-center gap-3">
         <PercentileBar value={pct} />
         <span className="w-24 shrink-0 text-right text-[11px] tabular-nums text-stone-500">
-          {pct == null ? "not ranked" : `${Math.round(pct * 100)}th pct`} · w{weight}
+          {pct == null ? "not ranked" : `${ordinal(Math.round(pct * 100))} pct`} · w{weight}
         </span>
       </div>
       {s.note && <p className="mt-1 text-[11px] text-stone-500">{s.note}</p>}
       <p className="mt-1 text-[11px]">
         <SourceLink source={s.source} />
+        {s.extra_sources.map((x) => (
+          <span key={x.dataset_id}>
+            {" "}+ <SourceLink source={x} />
+          </span>
+        ))}
       </p>
     </li>
   );
@@ -120,7 +131,7 @@ export default function SidePanel({ site, view, weights, live, rankOf, ramp, col
                 {score == null ? "—" : score.toFixed(1)}
               </div>
               <div className="text-sm">
-                <p className="font-medium text-stone-900">{view.score_label}</p>
+                <p className="font-medium text-stone-900">{view.score_label ?? view.label}</p>
                 {site.score != null ? (
                   <p className="text-stone-500">
                     {score == null ? "No score: all weights are zero" : `Rank ${live?.rank} of ${rankOf} UKPN primaries`}
@@ -157,18 +168,21 @@ export default function SidePanel({ site, view, weights, live, rankOf, ramp, col
 
             <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-500">Signals</h3>
             <p className="mt-1 text-[11px] text-stone-500">
-              {view.invert
-                ? "Bars: how favourable for a new connection vs other UKPN primaries (100 = best)."
-                : "Bars: how stuck vs other UKPN primaries (100 = most stuck)."}
+              Bars: how stuck vs other UKPN primaries (100 = most stuck).
             </p>
             <ul className="divide-y divide-stone-100">
               {site.signals.map((s) => (
-                <SignalRow key={s.key} s={s} invert={view.invert} weight={weights[s.key] ?? 0} />
+                <SignalRow key={s.key} s={s} weight={weights[s.key] ?? 0} />
               ))}
             </ul>
 
-            <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">Capacity</h3>
+            <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">Capacity and queue</h3>
             <div className="py-2">
+              <Row label="Demand queue (offered, not connected)" value={site.queue.queue_mw} unit="MW" />
+              {site.queue.note && <p className="text-[11px] text-stone-500">{site.queue.note}</p>}
+              <p className="mb-2 text-[11px]">
+                <SourceLink source={site.queue.source} />
+              </p>
               <Row label="Firm capacity" value={site.capacity.firm_capacity_mw} unit="MW" />
               <Row label="Observed peak (24/25)" value={site.capacity.observed_peak_mw} unit="MW" />
               <p className="mt-1 text-[11px]">

@@ -7,6 +7,10 @@ import MapView from "./MapView";
 import { rescore, type Weights } from "./scoring";
 import SidePanel from "./SidePanel";
 
+// The developer view (filter + rank by load size) gets its own UI in Phase 5;
+// until then only weighted views are offered.
+const weightedViews = (m: Meta) => m.views.filter((v) => v.type === "weighted");
+
 const INITIAL_FILTERS: Filters = { licenceAreas: [], voltages: [], minScore: 0 };
 
 function Legend({ label, ramp }: { label: string; ramp: Ramp }) {
@@ -45,7 +49,7 @@ export default function App() {
     fetchMeta()
       .then((m) => {
         setMeta(m);
-        setWeightsByView(Object.fromEntries(m.views.map((v) => [v.key, { ...v.weights }])));
+        setWeightsByView(Object.fromEntries(weightedViews(m).map((v) => [v.key, { ...v.weights! }])));
       })
       .catch((e) => setError(String(e)));
     fetchSites(INITIAL_FILTERS)
@@ -54,14 +58,14 @@ export default function App() {
       .catch((e) => setError(String(e)));
   }, []);
 
-  const view = meta?.views.find((v) => v.key === viewKey) ?? null;
+  const view = (meta && weightedViews(meta).find((v) => v.key === viewKey)) ?? null;
   const weights = weightsByView[viewKey];
   const ramp = rampFor(viewKey);
 
   // Live score + rank for every site under the current view and weights.
   const live = useMemo(() => {
     if (!allSites || !view || !weights) return null;
-    return rescore(allSites.features.map((f) => f.properties), weights, view.invert);
+    return rescore(allSites.features.map((f) => f.properties), weights);
   }, [allSites, view, weights]);
 
   // Sites that share exact coordinates, so the panel can offer the others.
@@ -120,7 +124,7 @@ export default function App() {
         </div>
         {meta && (
           <div className="flex items-center gap-2">
-            <ViewToggle views={meta.views} value={viewKey} onChange={setViewKey} />
+            <ViewToggle views={weightedViews(meta)} value={viewKey} onChange={setViewKey} />
             <button
               type="button"
               aria-expanded={showWeights}
@@ -140,7 +144,7 @@ export default function App() {
         <MapView sites={allSites} live={live} visible={visible} ramp={ramp} selectedId={selectedId} onSelect={setSelectedId} />
         {view && (
           <div className="pointer-events-none absolute left-3 top-3 sm:bottom-8 sm:top-auto">
-            <Legend label={view.score_label} ramp={ramp} />
+            <Legend label={view.score_label ?? view.label} ramp={ramp} />
           </div>
         )}
         {showWeights && view && meta && weights && (

@@ -16,7 +16,7 @@ import pandas as pd
 from .adapters.base import DNOAdapter
 from .adapters.ukpn import UKPNAdapter
 from .normalise import build_all
-from .score import load_config, print_top, score, write_scores
+from .score import load_config, print_all_tops, score, write_scores
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "grid.duckdb"
 
@@ -65,9 +65,7 @@ def main() -> None:
     summary(build(ADAPTERS, refresh=args.refresh))
     _, views = load_config()
     with duckdb.connect(str(DB_PATH), read_only=True) as con:
-        for v in views:
-            print(f"\nTop 20 — {v.label} view ({v.score_label}):")
-            print_top(con, view=v.key)
+        print_all_tops(con, views)
 
 
 if __name__ == "__main__":

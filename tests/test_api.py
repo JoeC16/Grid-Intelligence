@@ -16,8 +16,9 @@ def test_meta():
     assert m["licence_areas"] == ["EPN", "LPN", "SPN"]
     views = {v["key"]: v for v in m["views"]}
     assert sum(views["investor"]["weights"].values()) == 100
-    assert views["developer"]["invert"] is True
-    assert len(m["signals"]) == 5
+    assert views["developer"]["type"] == "filter_rank"
+    assert views["developer"]["load_mw_default"] == 50
+    assert len(m["signals"]) == 6
     assert "published headroom" in m["disclaimer"].lower()
 
 
@@ -36,7 +37,10 @@ def test_site_detail_every_number_has_a_source():
     top = max(client.get("/sites").json()["features"], key=lambda f: f["properties"]["score"] or -1)
     d = client.get(f"/sites/{top['properties']['site_id']}").json()
     assert d["rank"] == 1
-    assert len(d["signals"]) == 5
+    assert len(d["signals"]) == 6
+    stuck = next(x for x in d["signals"] if x["key"] == "stuck_mw")
+    assert stuck["extra_sources"][0]["dataset_id"]  # derived: queue + headroom sources
+    assert d["queue"]["source"]["dataset_id"]
     for sig in d["signals"]:
         assert sig["source"]["dataset_id"] and sig["source"]["publish_date"], sig
     assert d["capacity"]["source"]["dataset_id"]
@@ -46,8 +50,9 @@ def test_site_detail_every_number_has_a_source():
 
 def test_sites_carry_percentiles_and_both_scores():
     f = client.get("/sites").json()["features"][0]["properties"]
-    for k in ["pct_queue_pressure", "pct_headroom_tightness", "pct_utilisation",
-              "pct_recent_activity", "pct_future_squeeze", "developer_score", "developer_rank"]:
+    for k in ["pct_stuck_mw", "pct_oversubscription", "pct_headroom_tightness", "pct_utilisation",
+              "pct_recent_activity", "pct_future_squeeze", "stuck_mw", "oversubscription",
+              "headroom_after_queue_mw", "developer_rank"]:
         assert k in f
 
 

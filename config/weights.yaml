@@ -1,21 +1,29 @@
-# Scoring config.
+# Scoring config. Explained in docs/SCORING.md.
 #
 # signals: what is measured. Each is percentile-ranked across scorable primary
 #   substations, oriented so 1 = most stuck (direction: high = a bigger value
-#   is more stuck; low = a smaller value is).
+#   is more stuck; low = a smaller value is). Derived columns are computed in
+#   pipeline/score.py add_derived().
 #
-# views: how the percentiles are combined. Score = weighted sum, scaled 0-100.
-#   invert: false -> uses the stuck percentile p (investor: where is demand stuck?)
-#   invert: true  -> uses 1 - p                  (developer: where could I connect?)
-#   A site missing a signal is scored on the rest, weights re-normalised, and
-#   the gap is flagged. Weights need not sum to 100.
+# views:
+#   type: weighted     -> weighted sum of signal percentiles, scaled 0-100.
+#                         A site missing a signal is scored on the rest
+#                         (weights re-normalised) and the gap is flagged.
+#   type: filter_rank  -> no score. Keep sites that pass `filter`, rank them
+#                         by `rank_by`, highest first.
 
 signals:
-  queue_pressure:
-    column: queue_mw
+  stuck_mw:
+    column: stuck_mw
     direction: high
-    label: Queue pressure
-    description: Demand MW offered and not yet connected.
+    label: Stuck demand
+    description: "MW of queued demand beyond published headroom: max(queue_mw - demand_headroom_mw, 0)."
+
+  oversubscription:
+    column: oversubscription
+    direction: high
+    label: Oversubscription
+    description: "Queue relative to published headroom: queue_mw / max(demand_headroom_mw, 1)."
 
   headroom_tightness:
     column: demand_headroom_mw
@@ -43,25 +51,24 @@ signals:
 
 views:
   investor:
+    type: weighted
     label: Investor
     score_label: Stuck-demand score
-    description: Where demand is queuing and published headroom has run out.
-    invert: false
+    description: Where demand is queuing beyond published headroom. Leads the demo.
     weights:
-      queue_pressure: 30
-      headroom_tightness: 25
+      stuck_mw: 25
+      oversubscription: 20
+      headroom_tightness: 15
       utilisation: 15
-      recent_activity: 15
+      recent_activity: 10
       future_squeeze: 15
 
   developer:
+    type: filter_rank
     label: Developer
-    score_label: Connection opportunity score
-    description: Where published headroom is largest and the demand queue shortest.
-    invert: true
-    weights:
-      queue_pressure: 50
-      headroom_tightness: 50
-      utilisation: 0
-      recent_activity: 0
-      future_squeeze: 0
+    description: Sites with enough published headroom for the load, ranked by headroom left after the queue ahead.
+    load_mw_default: 50
+    # keep sites where demand_headroom_mw >= load size
+    filter_column: demand_headroom_mw
+    # rank by headroom_after_queue_mw = demand_headroom_mw - queue_mw, highest first
+    rank_by: headroom_after_queue_mw

@@ -26,20 +26,26 @@ Scoring unit = **primary substation** (the capacity heatmap's substation list), 
 - [x] Tests for normalise.py with a small fixture.
 - Done when: one sites table, one row per primary substation, all signal columns filled or flagged.
 
-## Phase 3 — Score (Day 4) ✅
-- [x] config/weights.yaml: queue pressure 30, headroom tightness 25, utilisation 15, recent activity 15, future squeeze 15.
+## Phase 3 — Score (Day 4) ✅ (revised)
+Definitions: docs/SCORING.md and config/weights.yaml.
+- [x] v1: queue pressure 30, headroom tightness 25, utilisation 15, recent activity 15, future squeeze 15. Superseded.
+- [x] Investor view (default, leads the demo): add stuck_mw = max(queue_mw − demand_headroom_mw, 0) and oversubscription = queue_mw / max(demand_headroom_mw, 1). Weights: stuck_mw 25, oversubscription 20, headroom tightness 15, utilisation 15, recent activity 10, future squeeze 15.
 - [x] score.py: percentile-rank each signal across UKPN primaries, weighted sum, 0–100. Score on available signals, flag missing.
+- [x] Developer view: not a score. Load size (MW, default 50); keep sites with demand_headroom_mw ≥ load; rank by headroom_after_queue_mw = demand_headroom_mw − queue_mw, highest first.
+- [x] docs/SCORING.md explains both views.
 - [x] Unit tests with a 5-row fixture.
-- Done when: top 20 printed and plausible.
+- Done when: top 20 printed for each view and plausible.
+- Open question: big 33 kV boards with lots of stuck MW still rank mid-table (Northfleet East 33kV 203rd). See docs/SCORING.md.
 
 ## Phase 4 — Map (Days 5–6) ✅
 - [x] FastAPI: /sites (with filters) and /sites/{id}.
 - [x] React + Vite + TS + MapLibre + Tailwind: substations coloured by score, filter bar (licence area, voltage, min score), side panel with every signal and its source link.
 - Done when: fast and clickable around London.
 
-## Phase 5 — Lenses and sliders (Day 7) ✅
-- [x] Toggle: Investor view (score) vs Developer view (inverted headroom and queue).
-- [x] Weight sliders that re-rank live.
+## Phase 5 — Lenses and sliders (Day 7) — reopened
+- [x] v1: investor/developer toggle with an inverted weighted developer score. Superseded by the developer definition in Phase 3.
+- [x] Weight sliders for the investor view that re-rank live (now show the six revised signals).
+- [ ] Developer view: "load size (MW)" input, default 50. Filter to sites with published headroom ≥ load, rank by headroom − queue ahead, re-ranking live as the load changes. Until then the toggle shows the investor view only.
 
 ## Phase 6 — AI ask box (Days 8–9)
 - [ ] /query endpoint using the Claude API with tools search_sites(filters) and get_site(id). Returns ranked sites plus a plain-English why. Only numbers from tools.

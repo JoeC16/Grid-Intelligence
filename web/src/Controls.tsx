@@ -33,16 +33,15 @@ interface WeightsPanelProps {
 
 export function WeightsPanel({ view, signals, weights, onChange, onClose }: WeightsPanelProps) {
   const total = Object.values(weights).reduce((a, b) => a + b, 0);
-  const isDefault = signals.every((s) => (weights[s.key] ?? 0) === (view.weights[s.key] ?? 0));
+  const defaults = view.weights ?? {};
+  const isDefault = signals.every((s) => (weights[s.key] ?? 0) === (defaults[s.key] ?? 0));
   return (
     <div className="pointer-events-auto w-72 rounded-md bg-white p-4 shadow-lg">
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm font-semibold text-stone-900">{view.label} weights</p>
           <p className="mt-0.5 text-[11px] leading-snug text-stone-500">
-            {view.invert
-              ? "Each signal counts in reverse: more headroom, a shorter queue, etc. score higher."
-              : "Higher weight = the signal counts for more in the score."}
+            Higher weight = the signal counts for more in the score.
           </p>
         </div>
         <button type="button" onClick={onClose} aria-label="Close weights" className="ml-2 rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700">
@@ -84,7 +83,7 @@ export function WeightsPanel({ view, signals, weights, onChange, onClose }: Weig
         <button
           type="button"
           disabled={isDefault}
-          onClick={() => onChange({ ...view.weights })}
+          onClick={() => onChange({ ...defaults })}
           className="rounded border border-stone-300 px-2 py-0.5 text-stone-700 enabled:hover:border-stone-500 disabled:opacity-40"
         >
           Reset
