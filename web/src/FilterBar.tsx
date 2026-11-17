@@ -5,6 +5,8 @@ interface Props {
   filters: Filters;
   onChange: (f: Filters) => void;
   shown: number | null;
+  /** Min score only applies when ranking by score. */
+  showMinScore: boolean;
 }
 
 function toggle<T>(list: T[], value: T): T[] {
@@ -28,7 +30,7 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
   );
 }
 
-export default function FilterBar({ meta, filters, onChange, shown }: Props) {
+export default function FilterBar({ meta, filters, onChange, shown, showMinScore }: Props) {
   if (!meta) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -58,6 +60,7 @@ export default function FilterBar({ meta, filters, onChange, shown }: Props) {
         ))}
       </div>
 
+{showMinScore && (
       <label className="flex items-center gap-2 text-xs text-stone-500">
         Min score
         <input
@@ -71,6 +74,7 @@ export default function FilterBar({ meta, filters, onChange, shown }: Props) {
         />
         <span className="w-6 tabular-nums font-medium text-stone-800">{filters.minScore}</span>
       </label>
+      )}
 
       <span className="text-xs text-stone-500 tabular-nums">
         {shown ?? "…"} of {meta.site_count} substations

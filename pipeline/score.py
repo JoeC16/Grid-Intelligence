@@ -128,11 +128,21 @@ def combine(pcts: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
     return np.floor(raw * 10 + 0.5) / 10
 
 
+def rank_desc(values: pd.Series) -> pd.Series:
+    """1 = highest; ties share the best rank. Values rounded to 3 dp first so
+    float noise doesn't split ties (and the browser, which gets 3 dp, agrees)."""
+    return values.round(3).rank(ascending=False, method="min").astype("Int64")
+
+
 def filter_rank(df: pd.DataFrame, view: View, load_mw: float) -> pd.Series:
     """Rank (1 = best) among sites with filter_column >= load_mw; NA for the rest."""
     eligible = df[view.filter_column] >= load_mw
-    ranked = df.loc[eligible, view.rank_by].rank(ascending=False, method="min")
-    return ranked.reindex(df.index).astype("Int64")
+    return rank_desc(df.loc[eligible, view.rank_by]).reindex(df.index)
+
+
+def stuck_rank(df: pd.DataFrame) -> pd.Series:
+    """Investor 'Most stuck MW' sort: rank by stuck_mw among sites with any stuck demand."""
+    return rank_desc(df.loc[df["stuck_mw"] > 0, "stuck_mw"]).reindex(df.index)
 
 
 def score(sites: pd.DataFrame, signals: list[Signal], views: list[View]) -> pd.DataFrame:
@@ -155,6 +165,8 @@ def score(sites: pd.DataFrame, signals: list[Signal], views: list[View]) -> pd.D
         else:
             df[f"{prefix}rank"] = filter_rank(df, v, v.load_mw_default)
             score_cols.append(f"{prefix}rank")
+    df["stuck_rank"] = stuck_rank(df)
+    score_cols.append("stuck_rank")
 
     present = df[pct_cols].notna()
     df["signals_used"] = present.sum(axis=1)

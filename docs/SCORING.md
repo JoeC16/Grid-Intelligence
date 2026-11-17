@@ -82,8 +82,21 @@ Modelled alternatives (not applied):
 - Do that, and also express headroom and 2030 headroom as a % of firm capacity:
   Northfleet rises to 87th; 7 boards at 33 kV+ make the top 50.
 
-Getting big boards into the top 20 needs stuck MW to dominate the score, or a
-separate lens. That's an open product decision.
+Getting big boards into the top 20 would need stuck MW to dominate the score.
+Instead, the investor view has a separate "Most stuck MW" sort (below).
+
+### Alternative sort: most stuck MW
+
+The investor view can also rank by `stuck_mw` alone, largest first. This answers
+the grid buyer's question directly ("where is the most demand stuck?") and puts
+the big boards on top: Northfleet East 33kV (303.8 MW), Rye House 33kV
+(154.9 MW), Stowmarket Grid 33kV (102.7 MW). Only sites with stuck demand
+(`stuck_mw > 0`, 124 today) are ranked; ties share the best rank. Stored as
+`site_scores.stuck_rank`.
+
+The score is unchanged by this sort: it still means "most constrained relative
+to size", which surfaces small overloaded primaries. The two together tell
+both stories.
 
 ## Developer view: connection shortlist
 
@@ -95,7 +108,8 @@ separate lens. That's an open product decision.
    highest first: published headroom left after the demand already queued ahead.
 
 Stored at the default load as `site_scores.developer_rank` (null = not
-eligible). At 50 MW, 70 sites qualify; Osborn St B 11kV ranks first (137.0 MW
+eligible). In the web app the load size is an input; the shortlist re-ranks as
+you type. At 50 MW, 70 sites qualify; Osborn St B 11kV ranks first (137.0 MW
 headroom, 4.4 MW queued, 132.6 MW left).
 
 The filter is on headroom *before* the queue, as specified. A site can pass the

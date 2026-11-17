@@ -25,10 +25,10 @@ cd web && npm install && npm run dev        # http://localhost:5173
 
 Scoring ([docs/SCORING.md](docs/SCORING.md), config in `config/weights.yaml`):
 
-- **Investor** (`score`, `rank`): stuck-demand score, 0–100. Six percentile-ranked signals (stuck MW, oversubscription, headroom tightness, utilisation, recent activity, future squeeze), weighted. Sites missing a signal are scored on the rest and flagged in `score_missing`.
+- **Investor** (`score`, `rank`): stuck-demand score, 0–100. Six percentile-ranked signals (stuck MW, oversubscription, headroom tightness, utilisation, recent activity, future squeeze), weighted. Sites missing a signal are scored on the rest and flagged in `score_missing`. Alternative sort: most stuck MW (`stuck_rank`).
 - **Developer** (`developer_rank`): not a score. Sites with published headroom ≥ a load size (default 50 MW), ranked by headroom left after the queue.
 
-The web app repeats the investor maths in the browser (`web/src/scoring.ts`, kept in step with `pipeline/score.py`) so weight sliders re-rank live.
+The web app repeats the investor maths in the browser (`web/src/scoring.ts`, kept in step with `pipeline/score.py`) so weight sliders, the stuck-MW sort and the developer load size re-rank live.
 
 See [docs/PROFILE.md](docs/PROFILE.md) for every dataset's columns, quirks, and how the joins work.
 

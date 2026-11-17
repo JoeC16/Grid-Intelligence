@@ -1,15 +1,23 @@
-import type { Signal, SiteDetail, Source, ViewMeta } from "./api";
-import { scoreColor, type Ramp } from "./colors";
+import type { Signal, SiteDetail, Source } from "./api";
 import type { Weights } from "./scoring";
+
+/** The top of the panel: the number the current ranking is about. */
+export interface Headline {
+  big: string; // shown in the coloured disc
+  color: string;
+  label: string; // what the number is
+  sub: string; // rank, or why it isn't ranked
+  detail?: string; // e.g. the sum behind it
+  secondary?: string; // the other investor measure, for context
+  sources?: Source[];
+}
 
 interface Props {
   site: SiteDetail | null;
-  view: ViewMeta;
-  weights: Weights;
-  live: { score: number | null; rank: number | null } | null;
-  rankOf: number;
-  ramp: Ramp;
-  colocated: { site_id: string; name: string; score: number | null }[];
+  headline: Headline | null;
+  /** Investor weights, shown beside each signal; null hides them. */
+  weights: Weights | null;
+  colocated: { site_id: string; name: string; tip: string; color: string }[];
   onSelect: (id: string) => void;
   loading: boolean;
   error: string | null;
@@ -49,7 +57,7 @@ function PercentileBar({ value }: { value: number | null }) {
   );
 }
 
-function SignalRow({ s, weight }: { s: Signal; weight: number }) {
+function SignalRow({ s, weight }: { s: Signal; weight: number | null }) {
   const pct = s.percentile;
   return (
     <li className="py-3">
@@ -62,7 +70,8 @@ function SignalRow({ s, weight }: { s: Signal; weight: number }) {
       <div className="mt-1.5 flex items-center gap-3">
         <PercentileBar value={pct} />
         <span className="w-24 shrink-0 text-right text-[11px] tabular-nums text-stone-500">
-          {pct == null ? "not ranked" : `${ordinal(Math.round(pct * 100))} pct`} · w{weight}
+          {pct == null ? "not ranked" : `${ordinal(Math.round(pct * 100))} pct`}
+          {weight != null && ` · w${weight}`}
         </span>
       </div>
       {s.note && <p className="mt-1 text-[11px] text-stone-500">{s.note}</p>}
@@ -89,8 +98,7 @@ function Row({ label, value, unit }: { label: string; value: number | null; unit
   );
 }
 
-export default function SidePanel({ site, view, weights, live, rankOf, ramp, colocated, onSelect, loading, error, onClose }: Props) {
-  const score = live?.score ?? null;
+export default function SidePanel({ site, headline, weights, colocated, onSelect, loading, error, onClose }: Props) {
   return (
     <aside className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:w-[380px]">
       <div className="flex items-start justify-between border-b border-stone-200 px-5 py-4">
@@ -123,27 +131,38 @@ export default function SidePanel({ site, view, weights, live, rankOf, ramp, col
         {error && <p className="mt-4 text-sm text-red-700">{error}</p>}
         {site && (
           <>
-            <section className="flex items-center gap-4 py-4">
-              <div
-                className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-lg font-semibold tabular-nums text-white"
-                style={{ background: scoreColor(score, ramp) }}
-              >
-                {score == null ? "—" : score.toFixed(1)}
-              </div>
-              <div className="text-sm">
-                <p className="font-medium text-stone-900">{view.score_label ?? view.label}</p>
-                {site.score != null ? (
-                  <p className="text-stone-500">
-                    {score == null ? "No score: all weights are zero" : `Rank ${live?.rank} of ${rankOf} UKPN primaries`}
+            {headline && (
+              <section className="py-4">
+                <div className="flex items-center gap-4">
+                  <div
+                    className="flex h-16 min-w-16 shrink-0 items-center justify-center rounded-full px-2 text-lg font-semibold tabular-nums text-white"
+                    style={{ background: headline.color }}
+                  >
+                    {headline.big}
+                  </div>
+                  <div className="text-sm">
+                    <p className="font-medium text-stone-900">{headline.label}</p>
+                    <p className="text-stone-500">{headline.sub}</p>
+                    {headline.secondary && <p className="mt-0.5 text-xs text-stone-500">{headline.secondary}</p>}
+                  </div>
+                </div>
+                {headline.detail && <p className="mt-2 text-xs text-stone-600">{headline.detail}</p>}
+                {headline.sources && headline.sources.length > 0 && (
+                  <p className="mt-1 text-[11px]">
+                    {headline.sources.map((x, i) => (
+                      <span key={x.dataset_id}>
+                        {i > 0 && " + "}
+                        <SourceLink source={x} />
+                      </span>
+                    ))}
                   </p>
-                ) : (
-                  <p className="text-stone-500">Not scored: {site.exclude_reason}</p>
                 )}
+                {site.score == null && <p className="mt-2 text-xs text-stone-500">Not scored: {site.exclude_reason}</p>}
                 {site.score_missing && (
-                  <p className="mt-0.5 text-xs text-stone-500">Scored without: {site.score_missing.split(",").join(", ")}</p>
+                  <p className="mt-1 text-xs text-stone-500">Score calculated without: {site.score_missing.split(",").join(", ")}</p>
                 )}
-              </div>
-            </section>
+              </section>
+            )}
 
             {colocated.length > 0 && (
               <div className="mb-4 rounded-md border border-stone-200 p-3 text-xs">
@@ -156,9 +175,9 @@ export default function SidePanel({ site, view, weights, live, rankOf, ramp, col
                         onClick={() => onSelect(o.site_id)}
                         className="flex w-full items-center gap-2 text-left text-stone-800 hover:underline"
                       >
-                        <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: scoreColor(o.score, ramp) }} />
+                        <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: o.color }} />
                         <span className="flex-1">{o.name}</span>
-                        <span className="tabular-nums text-stone-500">{o.score == null ? "—" : o.score.toFixed(1)}</span>
+                        <span className="text-right text-stone-500">{o.tip}</span>
                       </button>
                     </li>
                   ))}
@@ -172,7 +191,7 @@ export default function SidePanel({ site, view, weights, live, rankOf, ramp, col
             </p>
             <ul className="divide-y divide-stone-100">
               {site.signals.map((s) => (
-                <SignalRow key={s.key} s={s} weight={weights[s.key] ?? 0} />
+                <SignalRow key={s.key} s={s} weight={weights ? (weights[s.key] ?? 0) : null} />
               ))}
             </ul>
 

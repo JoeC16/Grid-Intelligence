@@ -35,17 +35,19 @@ Definitions: docs/SCORING.md and config/weights.yaml.
 - [x] docs/SCORING.md explains both views.
 - [x] Unit tests with a 5-row fixture.
 - Done when: top 20 printed for each view and plausible.
-- Open question: big 33 kV boards with lots of stuck MW still rank mid-table (Northfleet East 33kV 203rd). See docs/SCORING.md.
+- Big 33 kV boards with lots of stuck MW rank mid-table on the score (Northfleet East 33kV 203rd); answered by the "Most stuck MW" sort (Phase 5). See docs/SCORING.md.
 
 ## Phase 4 — Map (Days 5–6) ✅
 - [x] FastAPI: /sites (with filters) and /sites/{id}.
 - [x] React + Vite + TS + MapLibre + Tailwind: substations coloured by score, filter bar (licence area, voltage, min score), side panel with every signal and its source link.
 - Done when: fast and clickable around London.
 
-## Phase 5 — Lenses and sliders (Day 7) — reopened
+## Phase 5 — Lenses and sliders (Day 7) ✅
 - [x] v1: investor/developer toggle with an inverted weighted developer score. Superseded by the developer definition in Phase 3.
-- [x] Weight sliders for the investor view that re-rank live (now show the six revised signals).
-- [ ] Developer view: "load size (MW)" input, default 50. Filter to sites with published headroom ≥ load, rank by headroom − queue ahead, re-ranking live as the load changes. Until then the toggle shows the investor view only.
+- [x] Weight sliders for the investor view that re-rank live (six revised signals).
+- [x] Investor "Rank by: Score | Most stuck MW" sort (stuck_rank: stuck_mw > 0, largest first).
+- [x] Developer view: "load size (MW)" input, default 50. Filter to sites with published headroom ≥ load, rank by headroom − queue ahead, re-ranking live as the load changes.
+- [x] Ranked list panel for whichever ranking is active; map colour, tooltip and side panel follow it.
 
 ## Phase 6 — AI ask box (Days 8–9)
 - [ ] /query endpoint using the Claude API with tools search_sites(filters) and get_site(id). Returns ranked sites plus a plain-English why. Only numbers from tools.

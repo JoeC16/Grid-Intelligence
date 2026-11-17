@@ -20,6 +20,7 @@ import duckdb
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from pipeline.score import load_config
 
@@ -41,6 +42,7 @@ SIGNAL_DISPLAY = {
 }
 
 app = FastAPI(title="Grid Intelligence API", version="0.1.0")
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
@@ -170,7 +172,7 @@ def list_sites(
         df = df[df["score"].notna()]
 
     props = ["site_id", "name", "licence_area", "voltage", "gsp", "score", "rank",
-             "developer_rank", "queue_mw", "demand_headroom_mw", "headroom_after_queue_mw",
+             "developer_rank", "stuck_rank", "queue_mw", "demand_headroom_mw", "headroom_after_queue_mw",
              "stuck_mw", "oversubscription", *PCT_COLS]
     features = [
         {

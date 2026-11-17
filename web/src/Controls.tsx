@@ -1,16 +1,22 @@
+import { useEffect, useState } from "react";
 import type { SignalMeta, ViewMeta } from "./api";
 import type { Weights } from "./scoring";
 
-export function ViewToggle({ views, value, onChange }: { views: ViewMeta[]; value: string; onChange: (v: string) => void }) {
+export function Segmented({ label, options, value, onChange }: {
+  label: string;
+  options: { key: string; label: string; title?: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
   return (
-    <div className="inline-flex rounded-full border border-stone-300 bg-stone-100 p-0.5" role="radiogroup" aria-label="View">
-      {views.map((v) => (
+    <div className="inline-flex rounded-full border border-stone-300 bg-stone-100 p-0.5" role="radiogroup" aria-label={label}>
+      {options.map((v) => (
         <button
           key={v.key}
           type="button"
           role="radio"
           aria-checked={value === v.key}
-          title={v.description}
+          title={v.title}
           onClick={() => onChange(v.key)}
           className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition-colors ${
             value === v.key ? "bg-white text-stone-900 shadow-sm" : "text-stone-600 hover:text-stone-900"
@@ -90,5 +96,41 @@ export function WeightsPanel({ view, signals, weights, onChange, onClose }: Weig
         </button>
       </div>
     </div>
+  );
+}
+
+/** Load size in MW: number box + slider. Applies as you type. */
+export function LoadInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const commit = (t: string) => {
+    setText(t);
+    const v = Number(t);
+    if (t.trim() !== "" && Number.isFinite(v) && v >= 0) onChange(v);
+  };
+  return (
+    <label className="flex items-center gap-2 text-xs text-stone-500">
+      Load size
+      <input
+        type="number"
+        min={0}
+        step={5}
+        value={text}
+        onChange={(e) => commit(e.target.value)}
+        aria-label="Load size in MW"
+        className="w-16 rounded border border-stone-300 px-1.5 py-0.5 text-right tabular-nums text-stone-900"
+      />
+      MW
+      <input
+        type="range"
+        min={0}
+        max={150}
+        step={5}
+        value={Math.min(value, 150)}
+        onChange={(e) => commit(e.target.value)}
+        aria-label="Load size slider"
+        className="w-24 accent-stone-900"
+      />
+    </label>
   );
 }

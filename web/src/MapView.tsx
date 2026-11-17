@@ -1,23 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource, type Map as MLMap } from "maplibre-gl";
 import type { SitesGeoJSON } from "./api";
-import { INK, scoreColor, UNSCORED, type Ramp } from "./colors";
+import { INK, UNSCORED } from "./colors";
 
 const STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
 const LONDON: [number, number] = [-0.12, 51.5];
 const DATA_ATTRIBUTION =
   'Substation data: <a href="https://ukpowernetworks.opendatasoft.com/" target="_blank" rel="noreferrer">UK Power Networks Open Data</a>, CC BY 4.0';
 
-export type LiveScores = Map<string, { score: number | null; rank: number | null }>;
+/** What to draw for each site: its colour and the tooltip line. */
+export type Display = Map<string, { color: string; tip: string; rank: number | null }>;
 
 interface Props {
   /** Every site, loaded once. Never re-set on the map (that forces a re-tile). */
   sites: SitesGeoJSON | null;
-  /** Live score/rank per site for the current view + weights. */
-  live: LiveScores | null;
+  display: Display | null;
   /** site_ids that pass the filters. */
   visible: Set<string> | null;
-  ramp: Ramp;
   selectedId: string | null;
   onSelect: (siteId: string | null) => void;
 }
@@ -30,14 +29,14 @@ const COLOR = ["coalesce", ["feature-state", "color"], UNSCORED] as unknown as m
 const unlessHidden = (on: number): maplibregl.ExpressionSpecification =>
   ["case", ["boolean", ["feature-state", "hidden"], false], 0, on] as unknown as maplibregl.ExpressionSpecification;
 
-export default function MapView({ sites, live, visible, ramp, selectedId, onSelect }: Props) {
+export default function MapView({ sites, display, visible, selectedId, onSelect }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
   const [ready, setReady] = useState(false);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   // Latest props for the map's event handlers, which are bound once.
-  const latest = useRef({ live, visible, onSelect });
-  latest.current = { live, visible, onSelect };
+  const latest = useRef({ display, visible, onSelect });
+  latest.current = { display, visible, onSelect };
 
   // Create the map once.
   useEffect(() => {
@@ -104,13 +103,14 @@ export default function MapView({ sites, live, visible, ramp, selectedId, onSele
       const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 10 });
       popupRef.current = popup;
       // Several substations can share one point (e.g. a grid site's 33 kV and
-      // 11 kV boards), so list them all, highest live score first.
-      const byScore = (fs: maplibregl.MapGeoJSONFeature[]) => {
+      // 11 kV boards), so list them all, best-ranked first.
+      const rankOf = (id: string) => latest.current.display?.get(id)?.rank ?? Infinity;
+      const byRank = (fs: maplibregl.MapGeoJSONFeature[]) => {
         const seen = new Set<string>();
         return fs
           .map((f) => f.properties as { site_id: string; name: string })
           .filter((p) => !seen.has(p.site_id) && seen.add(p.site_id))
-          .sort((a, b) => (latest.current.live?.get(b.site_id)?.score ?? -1) - (latest.current.live?.get(a.site_id)?.score ?? -1));
+          .sort((a, b) => rankOf(a.site_id) - rankOf(b.site_id));
       };
       m.on("mousemove", (e) => {
         const hits = visibleHits(e.point);
@@ -120,10 +120,9 @@ export default function MapView({ sites, live, visible, ramp, selectedId, onSele
           return;
         }
         m.getCanvas().style.cursor = "pointer";
-        const lines = byScore(hits).map((p) => {
-          const l = latest.current.live?.get(p.site_id);
-          const score = l?.score == null ? "not scored" : `score ${l.score.toFixed(1)} · rank ${l.rank}`;
-          return `<strong>${escapeHtml(p.name)}</strong><br/><span style="color:#5f5e5a">${score}</span>`;
+        const lines = byRank(hits).map((p) => {
+          const tip = latest.current.display?.get(p.site_id)?.tip ?? "";
+          return `<strong>${escapeHtml(p.name)}</strong><br/><span style="color:#5f5e5a">${escapeHtml(tip)}</span>`;
         });
         popup
           .setLngLat((hits[0].geometry as GeoJSON.Point).coordinates as [number, number])
@@ -136,7 +135,7 @@ export default function MapView({ sites, live, visible, ramp, selectedId, onSele
           [e.point.x - 8, e.point.y - 8],
           [e.point.x + 8, e.point.y + 8],
         ]);
-        latest.current.onSelect(hits.length ? byScore(hits)[0].site_id : null);
+        latest.current.onSelect(hits.length ? byRank(hits)[0].site_id : null);
       });
 
       setReady(true);
@@ -157,21 +156,34 @@ export default function MapView({ sites, live, visible, ramp, selectedId, onSele
   // Push colour + visibility as feature-state: a repaint, not a re-tile.
   useEffect(() => {
     const m = map.current;
-    if (!ready || !m || !sites || !live) return;
-    popupRef.current?.remove(); // its score/rank would now be stale
+    if (!ready || !m || !sites || !display) return;
+    popupRef.current?.remove(); // its numbers would now be stale
     for (const f of sites.features) {
       const id = f.properties.site_id;
       m.setFeatureState(
         { source: "sites", id },
-        { color: scoreColor(live.get(id)?.score ?? null, ramp), hidden: visible ? !visible.has(id) : false },
+        { color: display.get(id)?.color ?? UNSCORED, hidden: visible ? !visible.has(id) : false },
       );
     }
-  }, [ready, sites, live, visible, ramp]);
+  }, [ready, sites, display, visible]);
 
-  // Highlight the selected site.
+  // Highlight the selected site, and bring it into view if it's off-screen
+  // (e.g. picked from the ranked list).
   useEffect(() => {
-    if (ready && map.current) map.current.setFilter("selected", ["==", ["get", "site_id"], selectedId ?? ""]);
-  }, [ready, selectedId]);
+    const m = map.current;
+    if (!ready || !m) return;
+    m.setFilter("selected", ["==", ["get", "site_id"], selectedId ?? ""]);
+    const f = selectedId && sites?.features.find((x) => x.properties.site_id === selectedId);
+    if (f) {
+      const c = f.geometry.coordinates;
+      const pad = 0.15; // keep clear of the edges and side panels
+      const b = m.getBounds();
+      const w = b.getEast() - b.getWest(), h = b.getNorth() - b.getSouth();
+      const inside = c[0] > b.getWest() + w * pad && c[0] < b.getEast() - w * (pad + 0.25) &&
+                     c[1] > b.getSouth() + h * pad && c[1] < b.getNorth() - h * pad;
+      if (!inside) m.easeTo({ center: c, zoom: Math.max(m.getZoom(), 10), duration: 600 });
+    }
+  }, [ready, selectedId, sites]);
 
   // MapLibre's CSS sets position:relative on the map element, so size it
   // inside a positioned wrapper rather than positioning it directly.

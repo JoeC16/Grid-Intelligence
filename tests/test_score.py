@@ -77,6 +77,12 @@ def test_developer_filter_and_rank(scored):
     assert pd.isna(scored.loc["A", "developer_rank"])
 
 
+def test_stuck_rank(scored):
+    # stuck MW: A 42, B 19, C 6 (10 - 4), D 0, E 0 -> D and E unranked
+    assert scored.loc[["A", "B", "C"], "stuck_rank"].tolist() == [1, 2, 3]
+    assert scored.loc[["D", "E"], "stuck_rank"].isna().all()
+
+
 def test_developer_load_size_changes_eligibility(sites):
     df = add_derived(sites[sites["scorable"]]).set_index("site_id")
     assert filter_rank(df, DEVELOPER, 10).dropna().index.tolist() == ["E"]
