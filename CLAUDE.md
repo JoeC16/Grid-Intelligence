@@ -24,3 +24,6 @@ See config/weights.yaml. Signals: queue pressure, headroom tightness, utilisatio
 - Tests for normalise.py and score.py with small fixtures.
 - Prefer simple, readable code over clever code.
 
+## Plan
+Follow PLAN.md. Do one phase at a time, then stop and tick it off.
+
