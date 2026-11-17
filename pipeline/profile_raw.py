@@ -1,4 +1,4 @@
-"""Phase 1 data spike: write data/PROFILE.md from the raw parquet files.
+"""Write docs/PROFILE.md from the raw parquet files in data/raw/.
 
 Usage:  uv run python -m pipeline.profile_raw
 """
@@ -10,14 +10,17 @@ from pathlib import Path
 
 import pandas as pd
 
-DATA = Path(__file__).resolve().parent.parent / "data"
-RAW = DATA / "raw"
+ROOT = Path(__file__).resolve().parent.parent
+RAW = ROOT / "data" / "raw"
+OUT = ROOT / "docs" / "PROFILE.md"
 
 PURPOSE = {
     "grid-and-primary-sites": "Spine. One row per grid/primary substation with lat/lon and FLOC.",
     "ukpn-dfes-network-headroom-report": "Future headroom (2024-2050) per substation, 4 DFES scenarios.",
     "ukpn-ltds-table-3a-load-data-observed": "Observed peak demand 24/25, 5-yr forecast, firm capacity.",
     "ukpn-capacity-heatmap": "LTDS heatmap: published demand headroom + demand connection offers/estimates (primaries).",
+    "ukpn-ltds-table-6-interest-connections": "LTDS new connection interest per substation x status (demand + generation MW and counts). Main source of queue_mw.",
+    "ukpn-large-demand-list": "Live, committed, not-yet-energised demand projects >= 5 MVA (and BESS), anonymised, GSP level. Where data-centre-scale demand shows up.",
     "ukpn-grid-supply-points-overview": "GSP-level observed power flow, asset/technical limits, utilisation.",
     "ukpn-gsp-insights": "Extra. GSP-level forecast demand (MW/MVAr) by regulatory year.",
     "ukpn-gsp-project-status": "Extra. GSP-level connection queue by Gate status — GENERATION technologies only.",
@@ -65,6 +68,21 @@ ODDITIES = {
         "NO demand queue here. This is capacity/utilisation context only.",
         "GSP names differ from LTDS/DFES/heatmap ('Canterbury' vs 'CANTERBURY NORTH', 'Barking West 33kV' vs 'BARKING WEST (EPN)'): needs a normalised name + licence-area crosswalk.",
     ],
+    "ukpn-ltds-table-6-interest-connections": [
+        "Published 29 May 2026 (portal modified 2026-09-21). One row per substation x status; four statuses: Budget Estimates Provided, offers made (not yet accepted), offers made (accepted), offers made (cancelled/expired/superseded).",
+        "`sitefunctionallocation` null for 290/933 rows; exact substation name recovers 269 of them.",
+        "18 duplicate substation x status rows (e.g. 'Barking 132kV GIS' listed once under an EPN FLOC and once with none) — summed.",
+        "Covers 563 substations. 129 heatmap sites with demand offers in the past year are absent from table 6, so the two don't agree on who has activity.",
+        "59 rows (6,467 MW of interest, all statuses) are at substations outside the heatmap: mostly 132kV grid sites plus a few LV-side boards (King Henrys Walk, Oysterbed Rd, Ridham Grid 11kV). Their queued MW (2,204 MW) is kept as GSP-level `grid_level_queue_mw`.",
+        "Demand capacities are float32 noise (e.g. 11.949999809). Round for display.",
+    ],
+    "ukpn-large-demand-list": [
+        "No substation: only licence area + GSP name. GSP names already match the GSP overview except BIGGLESWADE (4 large demand, 3 DER) and LITTLE HORSTED (6 DER), which aren't in the overview.",
+        "`required_import_capacity_kva` is rounded and in kVA (convert /1000 to MVA, not MW).",
+        "252 'Large Demand' + 244 'Distributed Energy Resource' (BESS). Applications 2009-07-10 to 2025-01-09.",
+        "Portal publish date 2025-11-04 despite 'reviewed monthly' — the oldest dataset we use. Flag its date in the UI.",
+        "Anonymised IDs ('DER #205') — no way to link to a site.",
+    ],
     "ukpn-gsp-insights": ["Long format. Values for 4 measures (GB Peak, GB Min, Access Period, Conn Pt Pk) x MW/MVAr x regulatory year."],
     "ukpn-gsp-project-status": [
         "Generation technologies only (solar, battery, wind, gas, EfW...). Measure is MW or count (#). Not usable for the demand queue signal.",
@@ -109,38 +127,62 @@ JOIN = """## Join
 | DFES headroom | sites (lat/lon) | `sitefunctionallocation` = `sitefunctionallocation` | 978/979 FLOCs (99.9%) |
 | LTDS 3a | sites | `functional_location` = `sitefunctionallocation` | 976/976 (100%) |
 | LTDS 3a | DFES | FLOC | 974/976 (99.8%) |
-| Capacity heatmap | DFES → FLOC | exact `name` = `substation_name` | 966/967 (99.9%) |
+| Capacity heatmap | FLOC | exact name in DFES → LTDS → sites list | 967/967 (Kimberley Rd B via the sites list) |
 | Heatmap | LTDS | `mrid` = `substation_mrid` | 0/967 — doesn't work |
-| Substation | GSP overview | normalised GSP name + licence area | heatmap 952/967 (98.4%), LTDS 961/976 (98.5%) |
+| LTDS table 6 | heatmap site | exact name, then FLOC | 874/933 rows; the other 59 are grid-level (see below) |
+| Large demand list | GSP overview | GSP name | 483/496 rows (BIGGLESWADE, LITTLE HORSTED missing) |
+| Substation | GSP overview | normalised GSP name + licence area + aliases | 959/964 sites |
 
-Whole universe = 981 substations that appear in DFES or LTDS:
-- 980/981 (99.9%) have lat/lon
-- 959/981 (97.8%) have location + DFES headroom + LTDS load + GSP
-- 944/981 (96.2%) also have heatmap demand-queue data (heatmap covers primaries only, so grid substations miss out by design)
+## Pipeline (Phase 2)
 
-**Unmatched rows**
-- `EPN-S0000000H8015`: in DFES, not in sites or LTDS. No location.
-- In DFES not LTDS: `LPN-S000000000615`, `SPN-S000000008480`, `SPN-S000000008546`, `SPN-S000000009112` (plus H8015).
-- In LTDS not DFES: `LPN-S000000000687`, `SPN-S000000009912`.
-- Heatmap: 'Kimberley Rd B 11kV' has no name match.
-- GSP names that won't map: 'Barking 132kV' (EPN, 4 primaries), 'Elstree Stanmore' (EPN, 6), 'Willesden' (EPN, 5). Need a manual decision in Phase 2.
-- GSP overview rows with no substations: BARKING C (EPN), GRENDON, TILBURY.
+Scoring unit = **primary substation**: the 967 capacity-heatmap rows, merged to 964 sites by FLOC (Purfleet, Sundon and Moreton Street are each split into two heatmap rows under one FLOC). 959 scorable.
 
-**What this means for Phase 2**
-- `site_id` = FLOC. Spine = grid-and-primary-sites, filtered to the 981 FLOCs with headroom/load data.
-- `firm_capacity_mw`, `observed_peak_mw` ← LTDS 3a (take winter or max of seasons; aggregate split sites).
-- `demand_headroom_mw` ← heatmap `demandavailablecapacity` (published headroom) for primaries; DFES current year for grid sites.
-- `headroom_2030_mw` ← DFES Demand Headroom, 2030 (scenario choice needed; suggest Counterfactual or a scenario mean).
-- `queue_mw` ← heatmap load offers made + accepted (+ budget estimates?). Primaries only; grid sites will be flagged missing.
-- `connections_last_year` ← no direct dataset yet. Heatmap accepted-offer count is the nearest proxy; worth checking `ukpn-ltds-table-6-interest-connections` and `ukpn-large-demand-list` in Phase 2.
-- The GSP overview does not carry a demand queue — the GSP-level queue datasets (`ukpn-gsp-project-status`) are generation-only.
+| field | source | rule |
+|---|---|---|
+| `demand_headroom_mw` | capacity heatmap `demandavailablecapacity` | published headroom; summed for split sites |
+| `firm_capacity_mw`, `observed_peak_mw` | LTDS 3a | binding season (highest peak/firm) per substation, summed per site |
+| `queue_mw` | LTDS table 6 | demand MW in "offers made (not yet accepted)" + "offers made (accepted)". Fallback: heatmap demand offers made + accepted (past year). Neither: 0, `queue_source = none` |
+| `connections_last_year` | capacity heatmap | demand offers accepted (count). Heatmap only lists sites with activity in the past year, so missing = 0 |
+| `headroom_2030_mw` | DFES, Demand Headroom, 2030 | **Holistic Transition**. Also stored: `headroom_2030_<scenario>` for all four, and every year in `headroom_scenarios` |
+| GSP `queue_mw` | sites + table 6 | sum of primary `queue_mw` + `grid_level_queue_mw` (table 6 rows at substations outside the heatmap) |
+| GSP `large_demand_*`, `der_import_*` | large demand list | count and MVA per GSP |
+
+Heatmap and LTDS 3a firm/peak figures disagree for most sites (different LTDS editions; heatmap firm−max = headroom for only 33%). We take headroom from the heatmap (published figure) and firm/peak from LTDS 3a, so utilisation is computed within one dataset.
+
+**DFES scenarios** in the dataset: Counterfactual, Holistic Transition, Electric Engagement, Hydrogen Evolution. Neither the data nor the metadata marks one as UKPN's central/best view, so Holistic Transition is the default.
+
+## GSP name crosswalk
+
+Resolved with evidence:
+- **Barking 132kV (EPN)** → `BARKING C (EPN)`. DFES names the group "Barking 132"; site `BARKING 132` has FLOC `EPN-S0000000C7139`, which is the FLOC of overview row `BARKING C (EPN)`.
+- **Elstree Stanmore (EPN)** → `ELSTREE`. DFES puts all six primaries under "Elstree 9", one of its Elstree groups; the overview has one ELSTREE (EPN) row.
+- **Willesden Grid 132kV** (table 6, grid level) → `WILLESDEN 132` by FLOC `LPN-S000000003298`.
+- Name aliases: Canterbury → CANTERBURY NORTH, Northfleet → NORTHFLEET EAST, Tilbury 1&7 / 2&8 → TILBURY SGTs 1&7 / 2&8.
+
+**Unmapped, excluded from scoring:**
+
+| site_id | name | reason |
+|---|---|---|
+| EPN-S0000000D8122 | Leicester Rd Grid 33kV | GSP "Willesden" (EPN) |
+| EPN-S0000000H8024 | Beresford Av Primary 11kV | GSP "Willesden" (EPN) |
+| EPN-S0000000H8045 | Wembley Park 11kV | GSP "Willesden" (EPN) |
+| EPN-S0000000H8050 | Bee Primary 11kV | GSP "Willesden" (EPN) |
+| EPN-S0000000H8113 | Central Wembley Primary 11kV | GSP "Willesden" (EPN) |
+
+All five sit under BSP "Leicester Road 33". The overview only has LPN rows WILLESDEN 132 and WILLESDEN 66, and nothing in the GSP overview or sites list says which one feeds them. Also unmapped: 1 MW of grid-level queue at 'Barking 132kV GIS' (LPN, FLOC `LPN-S000000003622`, not an overview FLOC).
+
+GSP overview rows with no primaries: GRENDON, TILBURY (plain).
+
+**Remaining gaps in `sites`**
+- `EPN-S0000000H8015` Luton St Marys Primary 11kV: not in LTDS 3a → no firm capacity / peak.
+- `LPN-S000000000246` Kimberley Rd B 11kV: not in LTDS 3a or DFES (they list 'Kimberley Rd 11kV' only) → no firm, peak or 2030 headroom.
 """
 
 
 def main() -> None:
     manifest = json.loads((RAW / "_manifest.json").read_text())
     parts = [
-        "# Raw data profile (Phase 1)",
+        "# Data profile",
         "",
         "Source: UK Power Networks Open Data Portal, via ukpyn. All datasets cover LPN, SPN and EPN.",
         "Generated by `uv run python -m pipeline.profile_raw`. Contains public data from UK Power Networks, licensed under CC BY 4.0.",
@@ -151,8 +193,9 @@ def main() -> None:
     for dataset_id in order + sorted(set(manifest) - set(order)):
         if dataset_id in manifest:
             parts.append(section(dataset_id, manifest[dataset_id]))
-    (DATA / "PROFILE.md").write_text("\n".join(parts))
-    print(f"wrote {DATA / 'PROFILE.md'}")
+    OUT.parent.mkdir(exist_ok=True)
+    OUT.write_text("\n".join(parts))
+    print(f"wrote {OUT}")
 
 
 if __name__ == "__main__":

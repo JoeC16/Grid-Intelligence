@@ -10,15 +10,25 @@ Goal: demo-ready MVP to show Fuse Energy. Not production. One phase per session.
 - [x] Find the join between headroom, GSP queue and lat/lon. Report the join, match rate and unmatched rows.
 - Done when: the join key is known and the match rate is reported. Paste PROFILE.md into the chat.
 
-## Phase 2 — Normalise (Day 3)
-- [ ] Build pipeline/adapters/base.py (DNOAdapter: fetch_sites, fetch_headroom, fetch_queue) and adapters/ukpn.py.
-- [ ] normalise.py: common schema (site_id, name, lat, lon, voltage, licence_area, gsp, firm_capacity_mw, demand_headroom_mw, observed_peak_mw, queue_mw, connections_last_year, headroom_2030_mw, source_dataset, source_date).
-- [ ] run.py loads everything into data/grid.duckdb in one command.
-- Done when: one sites table, one row per substation, all signal columns filled or flagged.
+## Phase 2 — Normalise (Day 3) ✅
+Scoring unit = **primary substation** (the capacity heatmap's substation list), keyed by FLOC. GSP view = primaries rolled up to their GSP.
+- [x] Download ukpn-ltds-table-6-interest-connections and ukpn-large-demand-list; add both to docs/PROFILE.md.
+- [x] Build pipeline/adapters/base.py (DNOAdapter: fetch_sites, fetch_headroom, fetch_future_headroom, fetch_queue, fetch_large_demand) and adapters/ukpn.py. All UKPN-specific logic (downloads, name matching, GSP crosswalk) lives in ukpn.py.
+- [x] normalise.py: common schema (site_id, name, lat, lon, voltage, licence_area, gsp, firm_capacity_mw, demand_headroom_mw, observed_peak_mw, queue_mw, connections_last_year, headroom_2030_mw, source_dataset, source_date) plus per-field provenance.
+  - demand_headroom_mw ← capacity heatmap (published headroom). firm_capacity_mw, observed_peak_mw ← LTDS 3a.
+  - queue_mw ← LTDS table 6 demand offers (made, not yet accepted + accepted); heatmap offers as fallback; queue_source flag.
+  - connections_last_year ← heatmap demand offers accepted (count, past year).
+  - headroom_2030_mw ← DFES Holistic Transition (no scenario is marked central); headroom_2030 stored for all four scenarios.
+  - Large demand list (GSP-level only) stored as its own table and rolled into the GSP view.
+  - GSPs that can't be mapped are flagged and excluded from scoring.
+- [x] GSP rollup table: sum queue_mw over primaries per GSP.
+- [x] run.py loads everything into data/grid.duckdb in one command.
+- [x] Tests for normalise.py with a small fixture.
+- Done when: one sites table, one row per primary substation, all signal columns filled or flagged.
 
 ## Phase 3 — Score (Day 4)
 - [ ] config/weights.yaml: queue pressure 30, headroom tightness 25, utilisation 15, recent activity 15, future squeeze 15.
-- [ ] score.py: percentile-rank each signal across UKPN, weighted sum, 0–100. Score on available signals, flag missing.
+- [ ] score.py: percentile-rank each signal across UKPN primaries, weighted sum, 0–100. Score on available signals, flag missing.
 - [ ] Unit tests with a 5-row fixture.
 - Done when: top 20 printed and plausible.
 
