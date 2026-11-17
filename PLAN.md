@@ -2,12 +2,12 @@
 
 Goal: demo-ready MVP to show Fuse Energy. Not production. One phase per session. At the end of each phase: stop, summarise what changed, what to check, and tick the phase off here.
 
-## Phase 1 — Data spike (Days 1–2)
-- [ ] Create .gitignore (.env, .env.*, keep .env.example, data/, *.duckdb, *.duckdb.wal, *.parquet, Python caches/venvs, node_modules/, web/dist/, .vercel/, .DS_Store, .vscode/, .idea/). Create .env.example with blank UKPN_API_KEY= and ANTHROPIC_API_KEY=. Confirm .env is ignored with git check-ignore.
-- [ ] Set up Python with uv: ukpyn, pandas, duckdb, python-dotenv.
-- [ ] Using ukpyn and the UKPN_API_KEY env var (check it exists, never print it), download for LPN, SPN, EPN: ukpn-grid-supply-points-overview, dfes-network-headroom-report, ltds-table-3a-load-data-observed, grid and primary substation locations, LTDS capacity heatmap JSON if available. Save raw to data/raw/ as parquet.
-- [ ] Write data/PROFILE.md: per dataset, row count, columns + types + 2 example values, licence, oddities.
-- [ ] Find the join between headroom, GSP queue and lat/lon. Report the join, match rate and unmatched rows.
+## Phase 1 — Data spike (Days 1–2) ✅
+- [x] Create .gitignore (.env, .env.*, keep .env.example, data/, *.duckdb, *.duckdb.wal, *.parquet, Python caches/venvs, node_modules/, web/dist/, .vercel/, .DS_Store, .vscode/, .idea/). Create .env.example with blank UKPN_API_KEY= and ANTHROPIC_API_KEY=. Confirm .env is ignored with git check-ignore.
+- [x] Set up Python with uv: ukpyn, pandas, duckdb, python-dotenv.
+- [x] Using ukpyn and the UKPN_API_KEY env var (check it exists, never print it), download for LPN, SPN, EPN: ukpn-grid-supply-points-overview, dfes-network-headroom-report, ltds-table-3a-load-data-observed, grid and primary substation locations, LTDS capacity heatmap JSON if available. Save raw to data/raw/ as parquet.
+- [x] Write data/PROFILE.md: per dataset, row count, columns + types + 2 example values, licence, oddities.
+- [x] Find the join between headroom, GSP queue and lat/lon. Report the join, match rate and unmatched rows.
 - Done when: the join key is known and the match rate is reported. Paste PROFILE.md into the chat.
 
 ## Phase 2 — Normalise (Day 3)

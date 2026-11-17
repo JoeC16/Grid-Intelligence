@@ -1,0 +1,30 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Data (never commit)
+data/
+*.duckdb
+*.duckdb.wal
+*.parquet
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Node / web
+node_modules/
+web/dist/
+.vercel/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
