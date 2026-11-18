@@ -21,6 +21,8 @@ uv run uvicorn api.main:app --port 8000     # API: /meta, /sites, /sites/{id}
 cd web && npm install && npm run dev        # http://localhost:5173
 ```
 
+AI ask box (`POST /query`): needs `ANTHROPIC_API_KEY` in the environment (a local `.env` works as a fallback; never commit it). Claude (`claude-opus-5-5`) answers with three tools: `search_sites`, `get_site` and `locate_place`. It may state only numbers its tools returned; any number in an answer that can't be matched to a tool result is listed in `unverified_numbers` and shown as a warning. Check it end to end with `uv run python -m scripts.ask_check` (5 questions, real billed API calls).
+
 `data/grid.duckdb` tables: `sites` (one row per primary substation), `gsps` (primaries rolled up to GSP, plus grid-level queue and large demand), `headroom_scenarios` (DFES headroom, all scenarios and years), `large_demand`, `field_sources` (dataset ID + publish date for every field), `site_scores` (0–100 stuck-demand score, rank and per-signal percentiles), `score_weights`.
 
 Scoring ([docs/SCORING.md](docs/SCORING.md), config in `config/weights.yaml`):
@@ -48,5 +50,7 @@ All data from the [UK Power Networks Open Data Portal](https://ukpowernetworks.o
 | `ukpn-gsp-insights` | GSP forecast demand (exploratory) | CC BY 4.0 |
 | `ukpn-gsp-project-status` | GSP generation queue (exploratory, not scored) | CC BY 4.0 |
 | `ukpn-overall-queue-insights` | UKPN-wide queue totals (exploratory) | CC BY 4.0 |
+
+Place names in the AI ask box are located with **OS Open Names** via [postcodes.io](https://postcodes.io/): contains OS data © Crown copyright and database right, licensed under the [Open Government Licence v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/). Only the place name is sent.
 
 Headroom figures are published firm-capacity headroom and are indicative only — not a guarantee of available capacity.

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchMeta, fetchSite, fetchSites, type Filters, type Meta, type SiteDetail, type SiteProps, type SitesGeoJSON } from "./api";
+import { fetchMeta, fetchSite, fetchSites, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON } from "./api";
+import AskPanel from "./AskPanel";
 import { gradientCss, rampFor, scoreColor, UNSCORED, type Ramp } from "./colors";
 import { LoadInput, Segmented, WeightsPanel } from "./Controls";
 import FilterBar from "./FilterBar";
@@ -10,7 +11,7 @@ import type { Weights } from "./scoring";
 import SidePanel, { type Headline } from "./SidePanel";
 
 const INITIAL_FILTERS: Filters = { licenceAreas: [], voltages: [], minScore: 0 };
-type Panel = "none" | "ranking" | "weights";
+type Panel = "none" | "ranking" | "weights" | "ask";
 
 const mw = (v: number | null | undefined) =>
   v == null ? "—" : v.toLocaleString("en-GB", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
@@ -63,6 +64,8 @@ export default function App() {
   const [detail, setDetail] = useState<SiteDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [askResult, setAskResult] = useState<QueryResult | null>(null);
+  const askIds = useMemo(() => askResult?.sites.map((s) => s.site_id) ?? [], [askResult]);
 
   // Load metadata and every site once; ranking and filtering happen here so
   // every control re-ranks instantly.
@@ -245,6 +248,9 @@ export default function App() {
               />
             )}
             {viewKey === "developer" && <LoadInput value={loadMw} onChange={setLoadMw} />}
+            <ToolbarButton active={panel === "ask"} onClick={() => togglePanel("ask")}>
+              Ask
+            </ToolbarButton>
             <ToolbarButton active={panel === "ranking"} onClick={() => togglePanel("ranking")}>
               Ranking
             </ToolbarButton>
@@ -259,7 +265,14 @@ export default function App() {
       </header>
 
       <main className="relative flex-1 overflow-hidden">
-        <MapView sites={allSites} display={display} visible={visible} selectedId={selectedId} onSelect={setSelectedId} />
+        <MapView
+          sites={allSites}
+          display={display}
+          visible={visible}
+          selectedId={selectedId}
+          highlightIds={panel === "ask" ? askIds : []}
+          onSelect={setSelectedId}
+        />
 
         <div className="pointer-events-none absolute bottom-8 left-3 hidden sm:block">
           <Legend ramp={ramp} {...legend} />
@@ -274,6 +287,17 @@ export default function App() {
               ranking={ranking}
               sites={byId}
               visible={visible}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onClose={() => setPanel("none")}
+            />
+          </div>
+        )}
+        {panel === "ask" && (
+          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36">
+            <AskPanel
+              result={askResult}
+              onResult={setAskResult}
               selectedId={selectedId}
               onSelect={setSelectedId}
               onClose={() => setPanel("none")}

@@ -143,3 +143,26 @@ export function fetchSites(f: Filters): Promise<SitesGeoJSON> {
 }
 
 export const fetchSite = (id: string) => get<SiteDetail>(`/sites/${encodeURIComponent(id)}`);
+
+export interface QueryResult {
+  answer: string;
+  sites: { site_id: string; name: string; lat: number; lon: number }[];
+  unverified_numbers: string[];
+  tool_calls: { name: string; input: Record<string, unknown> }[];
+  stop_reason: string | null;
+  model: string | null;
+  disclaimer: string;
+}
+
+export async function askQuestion(question: string): Promise<QueryResult> {
+  const res = await fetch(`${BASE}/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().then((d) => d.detail).catch(() => null);
+    throw new Error(typeof detail === "string" ? detail : `${res.status} ${res.statusText}`);
+  }
+  return res.json() as Promise<QueryResult>;
+}

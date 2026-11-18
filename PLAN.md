@@ -50,8 +50,9 @@ Definitions: docs/SCORING.md and config/weights.yaml.
 - [x] Ranked list panel for whichever ranking is active; map colour, tooltip and side panel follow it.
 
 ## Phase 6 — AI ask box (Days 8–9)
-- [ ] /query endpoint using the Claude API with tools search_sites(filters) and get_site(id). Returns ranked sites plus a plain-English why. Only numbers from tools.
-- [ ] Test with 5 questions, e.g. "Where could a 50 MW data centre connect fastest within 30 km of Slough?"
+- [x] /query endpoint using the Claude API with tools search_sites(filters) and get_site(id), plus locate_place(name) for place names. Returns ranked sites plus a plain-English why. Only numbers from tools: enforced by prompt, by tools that return every figure (distances included), and by a server-side check that flags any number not found in a tool result.
+- [x] Ask panel in the web app: answer, sites ringed on the map and clickable, warning on unverified numbers.
+- [ ] Test with 5 questions (scripts/ask_check.py), e.g. "Where could a 50 MW data centre connect fastest within 30 km of Slough?" Blocked: ANTHROPIC_API_KEY isn't reaching the session.
 - Done when: answers match the map, no invented numbers.
 
 ## Phase 7 — Polish and deploy (Day 10)

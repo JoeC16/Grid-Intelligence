@@ -18,6 +18,8 @@ interface Props {
   /** site_ids that pass the filters. */
   visible: Set<string> | null;
   selectedId: string | null;
+  /** Sites to ring on the map, e.g. the ones an AI answer names. */
+  highlightIds?: string[];
   onSelect: (siteId: string | null) => void;
 }
 
@@ -29,7 +31,7 @@ const COLOR = ["coalesce", ["feature-state", "color"], UNSCORED] as unknown as m
 const unlessHidden = (on: number): maplibregl.ExpressionSpecification =>
   ["case", ["boolean", ["feature-state", "hidden"], false], 0, on] as unknown as maplibregl.ExpressionSpecification;
 
-export default function MapView({ sites, display, visible, selectedId, onSelect }: Props) {
+export default function MapView({ sites, display, visible, selectedId, highlightIds = [], onSelect }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
   const [ready, setReady] = useState(false);
@@ -77,6 +79,19 @@ export default function MapView({ sites, display, visible, selectedId, onSelect 
           "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 1.5,
           "circle-stroke-opacity": unlessHidden(1),
+        },
+      });
+      m.addLayer({
+        id: "highlight",
+        type: "circle",
+        source: "sites",
+        filter: ["in", ["get", "site_id"], ["literal", []]],
+        paint: {
+          "circle-radius": byZoom(3),
+          "circle-color": "rgba(0,0,0,0)",
+          "circle-stroke-color": INK,
+          "circle-stroke-width": 1.5,
+          "circle-stroke-opacity": 0.7,
         },
       });
       m.addLayer({
@@ -166,6 +181,11 @@ export default function MapView({ sites, display, visible, selectedId, onSelect 
       );
     }
   }, [ready, sites, display, visible]);
+
+  // Ring the highlighted sites.
+  useEffect(() => {
+    if (ready && map.current) map.current.setFilter("highlight", ["in", ["get", "site_id"], ["literal", highlightIds]]);
+  }, [ready, highlightIds]);
 
   // Highlight the selected site, and bring it into view if it's off-screen
   // (e.g. picked from the ranked list).

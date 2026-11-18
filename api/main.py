@@ -17,12 +17,18 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import duckdb
+from dotenv import load_dotenv
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
+from pydantic import BaseModel, Field
+
+from api import assistant
 from pipeline.score import load_config
+
+load_dotenv()  # local fallback only; in the cloud environment keys come from env vars
 
 DB_PATH = Path(os.getenv("GRID_DB", Path(__file__).resolve().parent.parent / "data" / "grid.duckdb"))
 
@@ -46,7 +52,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -294,5 +300,55 @@ def get_site(site_id: str) -> dict:
         "headroom_2030": {"values": headroom_2030, "source": _source(dno, "headroom_2030_mw")},
         "location_source": _source(dno, "lat"),
         "gsp_context": gsp,
+        "disclaimer": DISCLAIMER,
+    }
+
+
+# ------------------------------------------------------------------- AI --
+
+
+class QueryIn(BaseModel):
+    question: str = Field(min_length=3, max_length=500)
+
+
+def _site_for_tool(site_id: str) -> dict:
+    try:
+        return get_site(site_id)
+    except HTTPException as exc:
+        return {"error": exc.detail}
+
+
+@app.post("/query")
+def query(body: QueryIn) -> dict:
+    """Answer a question with Claude, using search_sites / get_site / locate_place.
+
+    Only numbers returned by those tools may appear in the answer; any that
+    can't be matched to a tool result are listed in unverified_numbers.
+    """
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=503, detail="The AI ask box isn't configured: ANTHROPIC_API_KEY is not set.")
+    import anthropic
+
+    sites = _load()["sites"]
+    try:
+        result = assistant.ask(body.question, sites, _site_for_tool)
+    except anthropic.RateLimitError:
+        raise HTTPException(status_code=429, detail="The AI service is busy. Try again in a minute.")
+    except anthropic.APIStatusError as exc:
+        raise HTTPException(status_code=502, detail=f"AI service error ({exc.status_code}).")
+    except anthropic.APIConnectionError:
+        raise HTTPException(status_code=502, detail="Couldn't reach the AI service.")
+
+    by_id = sites.set_index("site_id")
+    return {
+        "answer": result.answer,
+        "sites": [
+            {"site_id": sid, "name": by_id.at[sid, "name"], "lat": _clean(by_id.at[sid, "lat"]), "lon": _clean(by_id.at[sid, "lon"])}
+            for sid in result.site_ids
+        ],
+        "unverified_numbers": result.unverified_numbers,
+        "tool_calls": result.tool_calls,
+        "stop_reason": result.stop_reason,
+        "model": result.model,
         "disclaimer": DISCLAIMER,
     }
