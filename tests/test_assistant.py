@@ -172,8 +172,19 @@ def test_loop_handles_refusal():
     assert out.stop_reason == "refusal" and out.site_ids == []
 
 
+def test_key_from_either_variable(monkeypatch):
+    for v in assistant.KEY_ENV_VARS:
+        monkeypatch.delenv(v, raising=False)
+    assert assistant.anthropic_key() is None
+    monkeypatch.setenv("GRID_ANTHROPIC_API_KEY", "grid-key")
+    assert assistant.anthropic_key() == "grid-key"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "main-key")
+    assert assistant.anthropic_key() == "main-key"  # the standard name wins
+
+
 def test_query_without_key_is_503(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    for v in assistant.KEY_ENV_VARS:
+        monkeypatch.delenv(v, raising=False)
     r = TestClient(app).post("/query", json={"question": "Where is demand stuck?"})
     assert r.status_code == 503
     assert "ANTHROPIC_API_KEY" in r.json()["detail"]

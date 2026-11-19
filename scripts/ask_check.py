@@ -1,6 +1,6 @@
 """Phase 6 check: ask Claude 5 questions and check the answers against the map.
 
-Usage:  uv run python -m scripts.ask_check        (needs ANTHROPIC_API_KEY; makes real, billed API calls)
+Usage:  uv run python -m scripts.ask_check        (needs ANTHROPIC_API_KEY or GRID_ANTHROPIC_API_KEY; makes real, billed API calls)
 
 For each question the expected sites are computed straight from the data with
 the same search the map uses. A question passes when:
@@ -32,8 +32,8 @@ def top_ids(sites, n=5, **args):
 
 
 def main() -> int:
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("ANTHROPIC_API_KEY is not set: nothing was asked.")
+    if not assistant.anthropic_key():
+        print(f"No Claude API key ({' or '.join(assistant.KEY_ENV_VARS)}): nothing was asked.")
         return 2
     sites = _load()["sites"]
     slough, chelmsford = place("Slough"), place("Chelmsford")

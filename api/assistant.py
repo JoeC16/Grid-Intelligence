@@ -23,6 +23,15 @@ import pandas as pd
 from pipeline.score import rank_desc
 
 MODEL = "claude-opus-5-5"
+
+# The Claude Code cloud environment doesn't pass ANTHROPIC_* variables through to
+# sessions, so the key can also be supplied under this name.
+KEY_ENV_VARS = ("ANTHROPIC_API_KEY", "GRID_ANTHROPIC_API_KEY")
+
+
+def anthropic_key() -> str | None:
+    """The Claude API key from the first of KEY_ENV_VARS that is set."""
+    return next((os.environ[v] for v in KEY_ENV_VARS if os.environ.get(v)), None)
 MAX_ROUNDS = 8
 PLACES_URL = "https://api.postcodes.io/places"
 PLACES_SOURCE = "Ordnance Survey OS Open Names via postcodes.io (Open Government Licence v3.0)"
@@ -290,9 +299,10 @@ def ask(question: str, sites: pd.DataFrame, get_site: Callable[[str], dict], cli
     import anthropic
 
     if client is None:
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            raise RuntimeError("ANTHROPIC_API_KEY is not set")
-        client = anthropic.Anthropic()
+        key = anthropic_key()
+        if not key:
+            raise RuntimeError(f"No Claude API key: set {' or '.join(KEY_ENV_VARS)}")
+        client = anthropic.Anthropic(api_key=key)
 
     messages: list[dict] = [{"role": "user", "content": question}]
     tool_outputs: list[str] = []

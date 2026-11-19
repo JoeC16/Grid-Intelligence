@@ -325,8 +325,11 @@ def query(body: QueryIn) -> dict:
     Only numbers returned by those tools may appear in the answer; any that
     can't be matched to a tool result are listed in unverified_numbers.
     """
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        raise HTTPException(status_code=503, detail="The AI ask box isn't configured: ANTHROPIC_API_KEY is not set.")
+    if not assistant.anthropic_key():
+        raise HTTPException(
+            status_code=503,
+            detail=f"The AI ask box isn't configured: set {' or '.join(assistant.KEY_ENV_VARS)}.",
+        )
     import anthropic
 
     sites = _load()["sites"]
