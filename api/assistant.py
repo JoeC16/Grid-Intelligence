@@ -211,6 +211,7 @@ def search_sites(sites: pd.DataFrame, args: dict) -> dict:
         rows.append(row)
     return {
         "total_matches": int(len(df)),
+        "stuck_demand_score_scale": [0, 100],
         "results": rows,
         "note": "result_rank ranks the matches by rank_by; score_rank_ukpn is the rank by stuck-demand score "
         "among all scored UKPN primaries.",
@@ -254,6 +255,8 @@ def _http_get_json(url: str, params: dict) -> dict:
 # ---------------------------------------------------------- number check --
 
 _NUM = re.compile(r"(?<![\w.])-?\d+(?:,\d{3})*(?:\.\d+)?")
+# A whole year used as a label ("headroom in 2030") isn't a data claim, unless a unit follows.
+_YEAR_AS_LABEL = re.compile(r"(?<![\w.])(199\d|20\d\d|2100)(?!\d)(?!\.\d)(?!,\d{3})(?!\s*(?:MW|MVA|kV|km|%|×|x\b))")
 
 
 def _numbers(text: str) -> list[str]:
@@ -265,8 +268,10 @@ def verify_numbers(answer: str, tool_outputs: list[str], question: str) -> list[
 
     A number matches a tool value if it equals the value rounded to the same
     number of decimal places (so "132.6" matches 132.6 and "133" matches 132.6
-    rounded to 0 dp). Signs are ignored ("−3.1 MW" vs "3.1 MW below").
+    rounded to 0 dp). Signs are ignored ("−3.1 MW" vs "3.1 MW below"). Whole
+    years 1990-2100 used as labels are skipped, unless a unit follows them.
     """
+    answer = _YEAR_AS_LABEL.sub(" ", answer)
     known: set[float] = set()
     for out in tool_outputs:
         known.update(abs(float(n)) for n in _numbers(out))
@@ -359,12 +364,24 @@ def ask(question: str, sites: pd.DataFrame, get_site: Callable[[str], dict], cli
     )
 
 
+def site_for_model(site: dict) -> dict:
+    """get_site output with percentiles on the 0-100 scale people quote (99.8, not 0.998)."""
+    if "signals" not in site:
+        return site
+    signals = [
+        {**s, "percentile": None if s.get("percentile") is None else round(100 * s["percentile"], 1)}
+        for s in site["signals"]
+    ]
+    return {**site, "signals": signals, "stuck_demand_score_scale": [0, 100],
+            "percentile_note": "percentile is 0-100 among UKPN primaries; 100 = most stuck on that signal."}
+
+
 def run_tool(name: str, args: dict, sites: pd.DataFrame, get_site: Callable[[str], dict]) -> dict:
     try:
         if name == "search_sites":
             return search_sites(sites, args)
         if name == "get_site":
-            return get_site(args["site_id"])
+            return site_for_model(get_site(args["site_id"]))
         if name == "locate_place":
             return locate_place(args["name"])
         return {"error": f"Unknown tool {name}"}

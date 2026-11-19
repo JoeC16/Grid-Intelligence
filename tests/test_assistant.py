@@ -36,9 +36,38 @@ def test_numbers_from_question_allowed():
     assert assistant.verify_numbers("for a 50 MW load within 30 km", [], "50 MW within 30 km of Slough?") == []
 
 
+def test_year_labels_skipped_but_year_valued_mw_checked():
+    tools = [json.dumps({"published_headroom_2030_mw": -2.3})]
+    assert assistant.verify_numbers("Published headroom in 2030 is -2.3 MW.", tools, "q") == []
+    assert assistant.verify_numbers("By 2030, 2030 MW is queued.", tools, "q") == ["2030"]
+    assert assistant.verify_numbers("Over 2030-2035 things tighten.", tools, "q") == []
+
+
+def test_score_scale_is_tool_data():
+    out = assistant.search_sites(pd.DataFrame(columns=_EMPTY_COLS).astype({"score": float}), _args(rank_by="score"))
+    assert assistant.verify_numbers("a score (0–100) of 98.0", [json.dumps(out), json.dumps({"s": 98.0})], "q") == []
+
+
 def test_negative_and_thousands():
     tools = [json.dumps({"x": -3.1, "y": 1234.5})]
     assert assistant.verify_numbers("−3.1 MW and 1,234.5 MW", tools, "q") == []
+
+
+# --------------------------------------------------------------- percentiles
+
+
+def test_site_for_model_scales_percentiles():
+    site = {"site_id": "X", "signals": [{"key": "stuck_mw", "percentile": 0.998}, {"key": "u", "percentile": None}]}
+    out = assistant.site_for_model(site)
+    assert [s["percentile"] for s in out["signals"]] == [99.8, None]
+    assert site["signals"][0]["percentile"] == 0.998  # the API's own copy is untouched
+    assert assistant.verify_numbers("99.8th percentile", [json.dumps(out)], "q") == []
+    assert assistant.site_for_model({"error": "no site"}) == {"error": "no site"}
+
+
+_EMPTY_COLS = ["site_id", "name", "licence_area", "voltage", "gsp", "score", "rank", "lat", "lon",
+               "demand_headroom_mw", "queue_mw", "headroom_after_queue_mw", "stuck_mw",
+               "utilisation", "headroom_2030_mw"]
 
 
 # -------------------------------------------------------------- locate_place
