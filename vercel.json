@@ -5,7 +5,7 @@
     "app.py": {
       "maxDuration": 120,
       "includeFiles": "{data/grid.duckdb,config/**,web/dist/**}",
-      "excludeFiles": "{data/raw/**,tests/**,scripts/**,docs/**,web/src/**,web/node_modules/**,web/public/**,.venv/**,**/__pycache__/**}"
+      "excludeFiles": "{data/raw/**,data/bronze/**,tests/**,scripts/**,docs/**,web/src/**,web/node_modules/**,web/public/**,.venv/**,**/__pycache__/**}"
     }
   }
 }
