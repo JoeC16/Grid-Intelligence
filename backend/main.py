@@ -338,7 +338,7 @@ def query(body: QueryIn) -> dict:
 
     sites = _load()["sites"]
     try:
-        result = assistant.ask(body.question, sites, _site_for_tool)
+        result = assistant.ask(body.question, sites, _site_for_tool, bsps=_load()["bsps"], gsps=_load()["gsps"])
     except anthropic.RateLimitError:
         raise HTTPException(status_code=429, detail="The AI service is busy. Try again in a minute.")
     except anthropic.APIStatusError as exc:

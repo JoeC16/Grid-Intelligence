@@ -217,3 +217,63 @@ def test_query_without_key_is_503(monkeypatch):
     r = TestClient(app).post("/query", json={"question": "Where is demand stuck?"})
     assert r.status_code == 503
     assert "ANTHROPIC_API_KEY" in r.json()["detail"]
+
+
+# ------------------------------------------------------------ graph tools
+
+
+def _site_id(name):
+    s = _load()["sites"]
+    return s.loc[s["name"] == name, "site_id"].iloc[0]
+
+
+@needs_db
+def test_get_upstream_matches_map_panel():
+    from backend.main import get_site
+    d = _load()
+    sid = _site_id("Kingston Grid 33kV")
+    out = assistant.get_upstream(d["sites"], d["bsps"], d["gsps"], sid)
+    panel = get_site(sid)["upstream"]  # what the side panel shows
+    assert out["effective_headroom_mw"] == assistant._num(panel["effective_headroom_mw"]) == 110.3
+    assert out["limited_by"] == "its BSP"
+    assert out["bsp"]["name"] == panel["bsp"]["name"] and out["bsp"]["this_site_is_its_own_board"]
+    assert out["gsp"]["name"] == panel["gsp"]["name"]
+
+
+@needs_db
+def test_get_upstream_direct_fed_site():
+    d = _load()
+    direct = d["sites"][d["sites"]["bsp_id"].isna() & d["sites"]["score"].notna()].iloc[0]["site_id"]
+    out = assistant.get_upstream(d["sites"], d["bsps"], d["gsps"], direct)
+    assert out["bsp"] is None and out["fed_directly_from_gsp"]
+
+
+@needs_db
+def test_get_siblings_matches_map_panel():
+    from backend.main import get_site
+    d = _load()
+    sid = _site_id("Kingston 11kV")
+    out = assistant.get_siblings(d["sites"], sid)
+    assert [x["site_id"] for x in out["siblings"]] == [x["site_id"] for x in get_site(sid)["siblings"]]
+    assert out["bsp"] == "Kingston Grid" and out["sibling_count"] == 6
+
+
+@needs_db
+def test_search_bsps_matches_pipeline_ranking():
+    d = _load()
+    out = assistant.search_bsps(d["bsps"], {"rank_by": "stuck_mw", "near": None, "licence_areas": None, "limit": 5})
+    stored = d["bsps"].dropna(subset=["stuck_rank"]).sort_values(["stuck_rank", "bsp_id"])
+    assert out["total_matches"] == len(stored)
+    assert [r["bsp_id"] for r in out["results"]] == stored["bsp_id"].head(5).tolist()
+    assert out["results"][0]["name"] == "Northfleet East"
+
+
+@needs_db
+def test_run_tool_dispatches_graph_tools_and_reports_unknown_site():
+    d = _load()
+    out = assistant.run_tool("get_upstream", {"site_id": "NOPE"}, d["sites"], _site_for_tool, d["bsps"], d["gsps"])
+    assert "error" in out
+
+
+def test_num_rounds_half_up_like_the_web_app():
+    assert assistant._num(422.15) == 422.2 and assistant._num(-326.95) == -327.0 and assistant._num(None) is None

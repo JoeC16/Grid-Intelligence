@@ -90,9 +90,10 @@ Decisions taken:
 3. Investor score unchanged; upstream shown alongside, plus a "BSPs" ranking.
 4. GSP flag = published import utilisation ≥ 100%. The GSP technical-limits RAG means "limits agreed with NESO yet", not a constraint, so it isn't used as one.
 
-## Phase 9 — Graph for the AI ask box
+## Phase 9 — Graph for the AI ask box ✅
 Expose the same tree to the Ask box so it can answer relationship questions and cite the path. The graph is small (~1.2k nodes), so tools over the DuckDB tables are enough; no graph database.
-- [ ] Tools: get_upstream(site_id) (path with headroom and queue at each level), get_siblings(site_id) (primaries on the same BSP), search_bsps(rank_by) (stuck MW, headroom after queue).
-- [ ] Prompt: explain upstream limits in plain words; numbers only from tools (existing check covers the new tools).
-- [ ] Extend scripts/ask_check.py with three relationship questions, e.g. "What else shares Bow's supply?", "Which BSPs have the most stuck demand?", "Is Kingston's headroom limited upstream?", checked against graph.py's own answers.
+- [x] Tools: get_upstream(site_id) (path with headroom and queue at each level), get_siblings(site_id) (primaries on the same BSP), search_bsps(rank_by) (stuck MW, headroom after queue).
+- [x] Prompt: explain upstream limits in plain words; numbers only from tools (existing check covers the new tools).
+- [x] Extend scripts/ask_check.py with three relationship questions, e.g. "What else shares Bow's supply?", "Which BSPs have the most stuck demand?", "Is Kingston's headroom limited upstream?", checked against graph.py's own answers.
 - Done when: relationship answers match the map's Upstream panel, no invented numbers.
+- Result: scripts/ask_check.py 8/8 (5 original + 3 relationship questions), no unverified numbers. Tool figures now round half-up like the web app (422.15 → 422.2), so answers and the map show the same numbers.

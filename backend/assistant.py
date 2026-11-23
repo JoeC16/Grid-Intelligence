@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+from decimal import ROUND_HALF_UP, Decimal
 import os
 import re
 from dataclasses import dataclass, field
@@ -48,6 +49,8 @@ Terms:
 - Stuck-demand score = a 0-100 investor score (higher = more constrained).
 
 The data has no connection dates or lead times. If asked how fast or soon something could connect, say that, and use headroom after queue (more is better) as the best available indicator.
+
+The network is a tree: each primary substation hangs off a bulk supply point (BSP), which hangs off a grid supply point (GSP); some primaries are fed directly from the GSP. Effective headroom = the lower of a site's headroom after queue and its BSP's headroom after the queue of every site under it; it is what limits a new connection, and it is what the map's developer view ranks on. Use get_upstream to explain what limits a site, get_siblings for what shares its supply, and search_bsps for questions about BSPs. GSPs publish no MW headroom, only import utilisation (peak / capacity). For a BSP, put its own board's site_id (when it has one) in site_ids.
 
 For any place name, call locate_place first, then search near the coordinates it returns. If the place is outside UKPN's area, say so and give the nearest UKPN sites the search returned.
 
@@ -128,6 +131,54 @@ TOOLS = [
         },
     },
     {
+        "name": "get_upstream",
+        "description": "What limits a site upstream: the site's own headroom after queue, its bulk supply point (BSP: "
+        "published headroom, queue under it, headroom left), its grid supply point (GSP: import utilisation), "
+        "the effective headroom and which level limits it.",
+        "strict": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {"site_id": {"type": "string"}},
+            "required": ["site_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_siblings",
+        "description": "The other sites fed from the same bulk supply point (BSP) as this site, most effective headroom first.",
+        "strict": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {"site_id": {"type": "string"}},
+            "required": ["site_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "search_bsps",
+        "description": "Search and rank bulk supply points (BSPs). rank_by: 'stuck_mw' (queued demand under the BSP beyond "
+        "its published headroom, largest first; BSPs with none are excluded), 'headroom_after_queue' (highest first) or "
+        "'queue_mw' (largest first). Optional filters (null = none): near a point, licence areas. Returns the total "
+        "number of matches and the top results.",
+        "strict": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "rank_by": {"type": "string", "enum": ["stuck_mw", "headroom_after_queue", "queue_mw"]},
+                "near": _nullable({
+                    "type": "object",
+                    "properties": {"lat": {"type": "number"}, "lon": {"type": "number"}, "radius_km": {"type": "number"}},
+                    "required": ["lat", "lon", "radius_km"],
+                    "additionalProperties": False,
+                }),
+                "licence_areas": _nullable({"type": "array", "items": {"type": "string", "enum": ["LPN", "SPN", "EPN"]}}),
+                "limit": _nullable({"type": "integer", "description": "Results to return, default 10, max 25."}),
+            },
+            "required": ["rank_by", "near", "licence_areas", "limit"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "get_site",
         "description": "Everything about one substation: every signal with its source dataset and publish date, "
         "capacity, queue, 2030 published headroom for each DFES scenario, and its GSP (queue and large demand projects).",
@@ -155,8 +206,15 @@ def haversine_km(lat1: float, lon1: float, lat2: pd.Series, lon2: pd.Series) -> 
 
 
 def _num(v: Any, digits: int = 1) -> float | None:
-    """Round for the model; None for missing."""
-    return None if v is None or pd.isna(v) else round(float(v), digits)
+    """Round for the model; None for missing.
+
+    Half-up on the shortest decimal form (422.15 -> 422.2), as the web app's
+    number formatting does, so figures in answers match the map.
+    """
+    if v is None or pd.isna(v):
+        return None
+    q = Decimal(repr(float(v))).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP)
+    return float(q)
 
 
 def search_sites(sites: pd.DataFrame, args: dict) -> dict:
@@ -221,6 +279,117 @@ def search_sites(sites: pd.DataFrame, args: dict) -> dict:
         "note": "result_rank ranks the matches by rank_by; score_rank_ukpn is the rank by stuck-demand score "
         "among all scored UKPN primaries.",
     }
+
+
+# ------------------------------------------------------- graph tools --
+
+
+def _site_row(sites: pd.DataFrame, site_id: str) -> dict:
+    match = sites[sites["site_id"] == site_id]
+    if match.empty:
+        raise KeyError(site_id)
+    return match.iloc[0].to_dict()
+
+
+def get_upstream(sites: pd.DataFrame, bsps: pd.DataFrame, gsps: pd.DataFrame, site_id: str) -> dict:
+    s = _site_row(sites, site_id)
+    local = None if pd.isna(s["demand_headroom_mw"]) or pd.isna(s["queue_mw"]) else s["demand_headroom_mw"] - s["queue_mw"]
+    out: dict[str, Any] = {
+        "site": {
+            "site_id": site_id, "name": s["name"],
+            "published_headroom_mw": _num(s["demand_headroom_mw"]), "queue_mw": _num(s["queue_mw"]),
+            "headroom_after_queue_mw": _num(local),
+        },
+        "effective_headroom_mw": _num(s.get("effective_headroom_mw")),
+        "limited_by": {"bsp": "its BSP", "primary": "the site itself"}.get(s.get("limiting_level"), s.get("limiting_level")),
+    }
+    bsp_id = s.get("bsp_id")
+    if bsp_id is None or pd.isna(bsp_id):
+        out["bsp"] = None
+        out["fed_directly_from_gsp"] = True
+    else:
+        b = bsps[bsps["bsp_id"] == bsp_id].iloc[0].to_dict()
+        out["bsp"] = {
+            "bsp_id": bsp_id, "name": b["name"],
+            "headroom_published": bool(b["matched"]) and not pd.isna(b["headroom_mw"]),
+            "published_headroom_mw": _num(b["headroom_mw"]),
+            "queue_under_it_mw": _num(b["queue_mw"]),
+            "sites_under_it": int(b["site_count"]),
+            "headroom_after_queue_mw": _num(b["headroom_after_queue_mw"]),
+            "stuck_mw": _num(b["stuck_mw"]),
+            "stuck_rank_among_bsps": None if pd.isna(b["stuck_rank"]) else int(b["stuck_rank"]),
+            "this_site_is_its_own_board": b["site_id"] == site_id,
+            "note": None if pd.isna(b["note"]) else b["note"],
+        }
+    g = gsps[gsps["gsp"] == s.get("gsp")] if len(gsps) else gsps
+    if len(g):
+        g0 = g.iloc[0]
+        rag = g0.get("technical_limit_rag")
+        out["gsp"] = {
+            "name": g0["gsp"],
+            "import_capacity_utilisation_pct": _num(g0.get("import_capacity_utilisation_pct")),
+            "peak_at_or_above_capacity": bool(s.get("gsp_over_capacity")),
+            "technical_limits_agreed_with_system_operator": None if pd.isna(rag) else rag == "GREEN",
+            "note": "GSPs publish no MW headroom.",
+        }
+    else:
+        out["gsp"] = None
+    return out
+
+
+def get_siblings(sites: pd.DataFrame, site_id: str) -> dict:
+    s = _site_row(sites, site_id)
+    bsp_id = s.get("bsp_id")
+    if bsp_id is None or pd.isna(bsp_id):
+        return {"site": s["name"], "bsp": None, "note": "Fed directly from its GSP: no BSP, so no siblings.", "siblings": []}
+    sib = sites[(sites["bsp_id"] == bsp_id) & (sites["site_id"] != site_id)]
+    sib = sib.sort_values("effective_headroom_mw", ascending=False, na_position="last")
+    return {
+        "site": s["name"],
+        "bsp": s.get("bsp_name"),
+        "sibling_count": int(len(sib)),
+        "siblings": [
+            {"site_id": r["site_id"], "name": r["name"],
+             "published_headroom_mw": _num(r["demand_headroom_mw"]), "queue_mw": _num(r["queue_mw"]),
+             "effective_headroom_mw": _num(r["effective_headroom_mw"]),
+             "limited_by": {"bsp": "its BSP", "primary": "the site itself"}.get(r["limiting_level"], r["limiting_level"])}
+            for r in sib.to_dict("records")
+        ],
+    }
+
+
+def search_bsps(bsps: pd.DataFrame, args: dict) -> dict:
+    df = bsps.copy()
+    if args.get("licence_areas"):
+        df = df[df["licence_area"].isin(args["licence_areas"])]
+    near = args.get("near")
+    if near:
+        df = df.dropna(subset=["lat", "lon"])
+        df["distance_km"] = haversine_km(near["lat"], near["lon"], df["lat"], df["lon"])
+        df = df[df["distance_km"] <= near["radius_km"]]
+    rank_by = args["rank_by"]
+    col = {"stuck_mw": "stuck_mw", "headroom_after_queue": "headroom_after_queue_mw", "queue_mw": "queue_mw"}[rank_by]
+    df = df.dropna(subset=[col])
+    if rank_by == "stuck_mw":
+        df = df[df["stuck_mw"] > 0]
+    df["result_rank"] = rank_desc(df[col])
+    df = df.sort_values(["result_rank", "bsp_id"])
+    limit = max(1, min(int(args.get("limit") or 10), 25))
+    rows = []
+    for r in df.head(limit).to_dict("records"):
+        row = {
+            "result_rank": int(r["result_rank"]), "bsp_id": r["bsp_id"], "name": r["name"],
+            "licence_area": r["licence_area"], "gsp": r["gsp"],
+            "own_board_site_id": None if pd.isna(r["site_id"]) else r["site_id"],
+            "sites_under_it": int(r["site_count"]),
+            "published_headroom_mw": _num(r["headroom_mw"]), "queue_under_it_mw": _num(r["queue_mw"]),
+            "headroom_after_queue_mw": _num(r["headroom_after_queue_mw"]), "stuck_mw": _num(r["stuck_mw"]),
+            "stuck_rank_among_bsps": None if pd.isna(r["stuck_rank"]) else int(r["stuck_rank"]),
+        }
+        if near:
+            row["distance_km"] = round(float(r["distance_km"]), 1)
+        rows.append(row)
+    return {"total_matches": int(len(df)), "results": rows}
 
 
 def locate_place(name: str, fetch: Callable[[str, dict], dict] | None = None) -> dict:
@@ -304,8 +473,11 @@ class Answer:
     model: str | None = None
 
 
-def ask(question: str, sites: pd.DataFrame, get_site: Callable[[str], dict], client: Any = None) -> Answer:
-    """Run the tool loop for one question."""
+def ask(question: str, sites: pd.DataFrame, get_site: Callable[[str], dict], client: Any = None,
+        bsps: pd.DataFrame | None = None, gsps: pd.DataFrame | None = None) -> Answer:
+    """Run the tool loop for one question. bsps/gsps feed the graph tools."""
+    bsps = bsps if bsps is not None else pd.DataFrame()
+    gsps = gsps if gsps is not None else pd.DataFrame()
     import anthropic
 
     if client is None:
@@ -341,7 +513,7 @@ def ask(question: str, sites: pd.DataFrame, get_site: Callable[[str], dict], cli
         for block in response.content:
             if block.type != "tool_use":
                 continue
-            out = run_tool(block.name, block.input, sites, get_site)
+            out = run_tool(block.name, block.input, sites, get_site, bsps, gsps)
             text = json.dumps(out, default=str)
             tool_outputs.append(text)
             calls.append({"name": block.name, "input": block.input})
@@ -381,10 +553,19 @@ def site_for_model(site: dict) -> dict:
             "percentile_note": "percentile is 0-100 among UKPN primaries; 100 = most stuck on that signal."}
 
 
-def run_tool(name: str, args: dict, sites: pd.DataFrame, get_site: Callable[[str], dict]) -> dict:
+def run_tool(name: str, args: dict, sites: pd.DataFrame, get_site: Callable[[str], dict],
+             bsps: pd.DataFrame | None = None, gsps: pd.DataFrame | None = None) -> dict:
+    bsps = bsps if bsps is not None else pd.DataFrame()
+    gsps = gsps if gsps is not None else pd.DataFrame()
     try:
         if name == "search_sites":
             return search_sites(sites, args)
+        if name == "get_upstream":
+            return get_upstream(sites, bsps, gsps, args["site_id"])
+        if name == "get_siblings":
+            return get_siblings(sites, args["site_id"])
+        if name == "search_bsps":
+            return search_bsps(bsps, args)
         if name == "get_site":
             return site_for_model(get_site(args["site_id"]))
         if name == "locate_place":

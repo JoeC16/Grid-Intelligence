@@ -5,6 +5,7 @@ const EXAMPLES = [
   "Where could a 50 MW data centre connect fastest within 30 km of Slough?",
   "Which substations have the most demand stuck in the queue?",
   "What are the five most constrained primaries in London?",
+  "Is Kingston Grid 33kV's headroom limited upstream?",
 ];
 
 interface Props {
