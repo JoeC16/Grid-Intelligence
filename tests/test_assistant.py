@@ -8,8 +8,8 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from api import assistant
-from api.main import DB_PATH, _load, _site_for_tool, app
+from backend import assistant
+from backend.main import DB_PATH, _load, _site_for_tool, app
 
 needs_db = pytest.mark.skipif(not Path(DB_PATH).exists(), reason="run pipeline.run first")
 

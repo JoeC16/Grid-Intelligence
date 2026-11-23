@@ -15,8 +15,8 @@ import os
 import sys
 import time
 
-from api import assistant
-from api.main import _load, _site_for_tool
+from backend import assistant
+from backend.main import _load, _site_for_tool
 
 def place(name: str) -> dict:
     """Same lookup the AI uses, so expected and actual searches start from the same point."""

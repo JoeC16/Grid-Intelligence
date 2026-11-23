@@ -364,7 +364,7 @@ class UKPNAdapter(DNOAdapter):
 
     def sources(self) -> dict[str, Source]:
         def src(ds: str) -> Source:
-            return Source(ds, self._date(ds), PORTAL + ds)
+            return Source(ds, self._date(ds), PORTAL + ds, self._manifest()[ds].get("license") or "")
 
         hm = src(HEATMAP_DS)
         return {

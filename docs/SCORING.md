@@ -130,4 +130,4 @@ uv run python -m pipeline.score    # re-score and print the top 20 for each view
 The web app reads the weights and views from the API, so no code change is
 needed for new weights. Adding a signal needs a derived column in
 `add_derived()` (if it isn't already a `sites` column) and a display entry in
-`api/main.py`.
+`backend/main.py`.

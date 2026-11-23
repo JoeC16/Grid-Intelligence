@@ -1,0 +1,13 @@
+# What the Vercel CLI does NOT upload. data/grid.duckdb and web/dist ARE uploaded
+# (they're gitignored, so they never go to GitHub; they're built in this container).
+.git
+.venv
+**/__pycache__
+.pytest_cache
+.env
+.env.*
+data/raw
+web/node_modules
+web/src
+tests
+scripts

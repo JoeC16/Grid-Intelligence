@@ -4,6 +4,7 @@ import AskPanel from "./AskPanel";
 import { gradientCss, rampFor, scoreColor, UNSCORED, type Ramp } from "./colors";
 import { LoadInput, Segmented, WeightsPanel } from "./Controls";
 import FilterBar from "./FilterBar";
+import Footer from "./Footer";
 import MapView, { type Display } from "./MapView";
 import RankList from "./RankList";
 import { colourPosition, describe, rankByScore, rankByStuck, rankForLoad, type Mode, type Ranking } from "./ranking";
@@ -64,6 +65,7 @@ export default function App() {
   const [detail, setDetail] = useState<SiteDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showFilters, setShowFilters] = useState(false); // phones only; always shown from sm up
   const [askResult, setAskResult] = useState<QueryResult | null>(null);
   const askIds = useMemo(() => askResult?.sites.map((s) => s.site_id) ?? [], [askResult]);
 
@@ -248,6 +250,11 @@ export default function App() {
               />
             )}
             {viewKey === "developer" && <LoadInput value={loadMw} onChange={setLoadMw} />}
+            <span className="sm:hidden">
+              <ToolbarButton active={showFilters} onClick={() => setShowFilters((v) => !v)}>
+                Filters
+              </ToolbarButton>
+            </span>
             <ToolbarButton active={panel === "ask"} onClick={() => togglePanel("ask")}>
               Ask
             </ToolbarButton>
@@ -261,7 +268,9 @@ export default function App() {
             )}
           </div>
         )}
-        <FilterBar meta={meta} filters={filters} onChange={setFilters} shown={visible?.size ?? null} showMinScore={mode === "score"} />
+        <div className={`${showFilters ? "flex" : "hidden"} w-full sm:flex sm:w-auto`}>
+          <FilterBar meta={meta} filters={filters} onChange={setFilters} shown={visible?.size ?? null} showMinScore={mode === "score"} />
+        </div>
       </header>
 
       <main className="relative flex-1 overflow-hidden">
@@ -335,6 +344,7 @@ export default function App() {
           </div>
         )}
       </main>
+      <Footer meta={meta} />
     </div>
   );
 }

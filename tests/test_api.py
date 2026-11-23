@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import DB_PATH, app
+from backend.main import DB_PATH, app
 
 pytestmark = pytest.mark.skipif(not Path(DB_PATH).exists(), reason="run pipeline.run first")
 client = TestClient(app)

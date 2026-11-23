@@ -1,6 +1,6 @@
 """Grid Intelligence API. Reads data/grid.duckdb (built by `pipeline.run`).
 
-Run:  uv run uvicorn api.main:app --reload
+Run:  uv run uvicorn backend.main:app --reload
 
 Endpoints
   GET /meta          filter options, scoring weights, data sources
@@ -25,7 +25,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from pydantic import BaseModel, Field
 
-from api import assistant
+from backend import assistant
 from pipeline.score import load_config
 
 load_dotenv()  # local fallback only; in the cloud environment keys come from env vars

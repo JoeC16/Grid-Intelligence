@@ -17,7 +17,7 @@ uv run pytest
 Run the map locally (two terminals):
 
 ```bash
-uv run uvicorn api.main:app --port 8000     # API: /meta, /sites, /sites/{id}
+uv run uvicorn backend.main:app --port 8000     # API: /meta, /sites, /sites/{id}
 cd web && npm install && npm run dev        # http://localhost:5173
 ```
 
@@ -33,6 +33,22 @@ Scoring ([docs/SCORING.md](docs/SCORING.md), config in `config/weights.yaml`):
 The web app repeats the investor maths in the browser (`web/src/scoring.ts`, kept in step with `pipeline/score.py`) so weight sliders, the stuck-MW sort and the developer load size re-rank live.
 
 See [docs/PROFILE.md](docs/PROFILE.md) for every dataset's columns, quirks, and how the joins work.
+
+## Deploy (Vercel)
+
+One Vercel project serves both: `app.py` mounts the API at `/api` and serves the built web app at `/`. Vercel detects `app.py` as a FastAPI app; `vercel.json` ships `data/grid.duckdb`, `config/` and `web/dist/` with the function.
+
+`data/` is never committed, so deploy from a machine that has built it:
+
+```bash
+uv run python -m pipeline.run          # builds data/grid.duckdb
+cd web && npm run build && cd ..       # builds web/dist
+vercel deploy --prod                   # uploads per .vercelignore (includes the .duckdb and dist)
+```
+
+In the Vercel project settings, add `ANTHROPIC_API_KEY` (Environment Variables) for the AI ask box. Everything else works without it.
+
+To run the production setup locally: `uv run uvicorn app:app --port 8000` after building both.
 
 ## Data sources and licences
 

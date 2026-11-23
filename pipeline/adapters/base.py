@@ -59,6 +59,7 @@ class Source:
     dataset_id: str
     publish_date: str  # YYYY-MM-DD
     url: str
+    licence: str = ""  # e.g. "CC BY 4.0", as published with the dataset
 
 
 class DNOAdapter(ABC):

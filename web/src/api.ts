@@ -1,4 +1,4 @@
-// Typed client for the FastAPI backend (api/main.py).
+// Typed client for the FastAPI backend (backend/main.py).
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -38,7 +38,7 @@ export interface Meta {
   signals: SignalMeta[];
   views: ViewMeta[];
   headroom_2030_scenario: string;
-  sources: (Source & { dno: string; field: string })[];
+  sources: (Source & { dno: string; field: string; licence: string })[];
 }
 
 export interface SiteProps {

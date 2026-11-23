@@ -151,7 +151,8 @@ def build_gsps(
 
 def build_field_sources(adapter: DNOAdapter) -> pd.DataFrame:
     rows = [
-        {"dno": adapter.dno, "field": f, "dataset_id": s.dataset_id, "publish_date": s.publish_date, "url": s.url}
+        {"dno": adapter.dno, "field": f, "dataset_id": s.dataset_id, "publish_date": s.publish_date, "url": s.url,
+         "licence": s.licence}
         for f, s in adapter.sources().items()
     ]
     return pd.DataFrame(rows)
