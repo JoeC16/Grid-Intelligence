@@ -97,3 +97,26 @@ Expose the same tree to the Ask box so it can answer relationship questions and 
 - [x] Extend scripts/ask_check.py with three relationship questions, e.g. "What else shares Bow's supply?", "Which BSPs have the most stuck demand?", "Is Kingston's headroom limited upstream?", checked against graph.py's own answers.
 - Done when: relationship answers match the map's Upstream panel, no invented numbers.
 - Result: scripts/ask_check.py 8/8 (5 original + 3 relationship questions), no unverified numbers. Tool figures now round half-up like the web app (422.15 → 422.2), so answers and the map show the same numbers.
+
+## Phase 10 — Medallion layers, network view and the Fuse story
+Make the data layered and time-aware, show the whole network graph, and turn it into a story you can click through with Fuse. Every number in the story comes from the gold layer, with its source.
+
+Layers:
+- **Bronze**: raw downloads exactly as received, kept per snapshot: `data/bronze/<YYYY-MM-DD>/<dataset>.parquet` + manifest. A refresh adds a snapshot; nothing is overwritten.
+- **Silver**: conformed entities with stable IDs and provenance, one row per entity per snapshot (`silver.sites`, `silver.bsps`, `silver.gsps`), plus the graph model `silver.nodes` / `silver.edges`.
+- **Gold**: what the app reads. The current tables (sites, bsps, gsps, site_scores …) plus marts per level: `gold.gsp_mart`, `gold.bsp_mart`, `gold.site_mart`, time series `gold.headroom_timeline`, `gold.large_demand_by_year`, and `gold.changes` (latest vs previous snapshot).
+
+Time, from data we already have:
+- DFES forecasts headroom year by year to 2050: the year headroom first goes negative ("runs out"), per site and per BSP.
+- The large demand list has application dates: how fast data-centre-scale demand requests are arriving, per GSP.
+- Snapshot diffs show what moved between publications. Only one snapshot exists today (UKPN's portal doesn't keep old versions), so this fills in from the next refresh.
+
+Tasks:
+- [ ] Bronze snapshots: move data/raw to data/bronze/<date>/; adapters read the latest snapshot; `pipeline.run --refresh` writes a new one.
+- [ ] Silver: per-snapshot entity tables with snapshot_date; graph nodes/edges with source dataset per node.
+- [ ] Gold: GSP / BSP / site marts with the same core measures at each level (queue, stuck MW, effective headroom, sites limited upstream, runs-out year, large demand at GSP level); headroom timeline; large demand by year; changes between snapshots.
+- [ ] docs/DATA_MODEL.md: the three layers, every table, and how a number travels from bronze to the screen.
+- [ ] API: /network (nodes + edges to draw), /gsps (GSP mart), /story (chapters built from gold, with sources and map focus).
+- [ ] Web: "Network" toggle drawing the GSP → BSP → primary tree on the map (nodes sized by stuck MW); GSP panel; "Story" panel that walks through the chapters and moves the map to each one.
+- [ ] Tests for the marts, runs-out year, snapshot diff and story numbers (every number in a chapter traceable to a gold table).
+- Done when: the network can be shown on the map, the story clicks through end to end with sourced numbers, and the data model is documented.
