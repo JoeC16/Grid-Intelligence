@@ -36,6 +36,8 @@ See [docs/PROFILE.md](docs/PROFILE.md) for every dataset's columns, quirks, and 
 
 ## Deploy (Vercel)
 
+Live: https://grid-intelligence-psi.vercel.app
+
 One Vercel project serves both: `app.py` mounts the API at `/api` and serves the built web app at `/`. Vercel detects `app.py` as a FastAPI app; `vercel.json` ships `data/grid.duckdb`, `config/` and `web/dist/` with the function.
 
 `data/` is never committed, so deploy from a machine that has built it:

@@ -55,7 +55,7 @@ Definitions: docs/SCORING.md and config/weights.yaml.
 - [x] Test with 5 questions (scripts/ask_check.py), e.g. "Where could a 50 MW data centre connect fastest within 30 km of Slough?" All 5 name the expected sites, every number traced to a tool result, "published headroom" throughout. (Key supplied as GRID_ANTHROPIC_API_KEY: the cloud environment doesn't pass ANTHROPIC_* to sessions.)
 - Done when: answers match the map, no invented numbers.
 
-## Phase 7 — Polish and deploy (Day 10)
-- [ ] Attribution footer per licence, "published headroom, not guaranteed" disclaimer.
-- [ ] Deploy: frontend on Vercel, API on Fly.io or Railway.
-- [ ] README with setup, data sources and licences.
+## Phase 7 — Polish and deploy (Day 10) ✅
+- [x] Attribution footer per licence (UKPN CC BY 4.0 with changes stated, OS Open Names OGL v3, OpenStreetMap), "published headroom, not guaranteed" disclaimer, and a Sources & licences dialog listing every dataset with publish date and licence.
+- [x] Deploy: frontend and API together on Vercel (one FastAPI app, app.py) instead of Vercel + Fly.io/Railway. Live: https://grid-intelligence-psi.vercel.app. ANTHROPIC_API_KEY to be added in Vercel for the Ask box.
+- [x] README with setup, deploy, data sources and licences.
