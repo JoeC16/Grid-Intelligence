@@ -22,6 +22,11 @@ interface Props {
   highlightIds?: string[];
   /** Upstream path of the selected site: lines (kind "path" | "sibling") and BSP/GSP points (kind "bsp" | "gsp"). */
   topology?: GeoJSON.FeatureCollection | null;
+  /** The whole network tree (from /network), drawn when not null. */
+  network?: GeoJSON.FeatureCollection | null;
+  /** Fly the camera here; change `key` to fly again to the same place. */
+  flyTo?: { center: [number, number]; zoom: number; key: number } | null;
+  onSelectGsp?: (gsp: string) => void;
   onSelect: (siteId: string | null) => void;
 }
 
@@ -35,14 +40,16 @@ const unlessHidden = (on: number): maplibregl.ExpressionSpecification =>
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
-export default function MapView({ sites, display, visible, selectedId, highlightIds = [], topology = null, onSelect }: Props) {
+export default function MapView({
+  sites, display, visible, selectedId, highlightIds = [], topology = null, network = null, flyTo = null, onSelectGsp, onSelect,
+}: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
   const [ready, setReady] = useState(false);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   // Latest props for the map's event handlers, which are bound once.
-  const latest = useRef({ display, visible, onSelect });
-  latest.current = { display, visible, onSelect };
+  const latest = useRef({ display, visible, onSelect, onSelectGsp });
+  latest.current = { display, visible, onSelect, onSelectGsp };
 
   // Create the map once.
   useEffect(() => {
@@ -71,6 +78,19 @@ export default function MapView({ sites, display, visible, selectedId, highlight
       const RADII = [6, 3, 9, 5, 12, 9, 15, 13];
       const byZoom = (extra: number) =>
         ["interpolate", ["linear"], ["zoom"], ...RADII.map((v, i) => (i % 2 ? v + extra : v))] as unknown as maplibregl.ExpressionSpecification;
+
+      // Network tree (Phase 10): edges under the dots, BSP/GSP nodes above them.
+      m.addSource("network", { type: "geojson", data: EMPTY });
+      m.addLayer({
+        id: "net-site-edges", type: "line", source: "network",
+        filter: ["==", ["get", "kind"], "edge_site"],
+        paint: { "line-color": INK, "line-width": 0.6, "line-opacity": 0.25 },
+      });
+      m.addLayer({
+        id: "net-bsp-edges", type: "line", source: "network",
+        filter: ["==", ["get", "kind"], "edge_bsp"],
+        paint: { "line-color": INK, "line-width": 1.4, "line-opacity": 0.55 },
+      });
 
       // Upstream lines sit under the dots; BSP/GSP markers go on top (added below).
       m.addSource("topology", { type: "geojson", data: EMPTY });
@@ -115,6 +135,45 @@ export default function MapView({ sites, display, visible, selectedId, highlight
           "circle-stroke-opacity": 0.7,
         },
       });
+      // Node size = stuck MW; filled when there is stuck demand.
+      const nodeRadius = (base: number) =>
+        ["interpolate", ["linear"], ["get", "stuck_mw"], 0, base, 50, base + 5, 300, base + 14] as unknown as maplibregl.ExpressionSpecification;
+      m.addLayer({
+        id: "net-bsp-nodes", type: "circle", source: "network",
+        filter: ["==", ["get", "kind"], "node_bsp"],
+        paint: {
+          "circle-radius": nodeRadius(3.5),
+          "circle-color": ["case", [">", ["get", "stuck_mw"], 0], INK, "#ffffff"],
+          "circle-opacity": 0.85,
+          "circle-stroke-color": INK,
+          "circle-stroke-width": 1.5,
+        },
+      });
+      m.addLayer({
+        id: "net-gsp-nodes", type: "circle", source: "network",
+        filter: ["==", ["get", "kind"], "node_gsp"],
+        paint: {
+          "circle-radius": nodeRadius(6),
+          "circle-color": "#ffffff",
+          "circle-stroke-color": INK,
+          "circle-stroke-width": ["case", [">", ["get", "stuck_mw"], 0], 4, 2],
+        },
+      });
+      const nodeTip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12 });
+      for (const layer of ["net-bsp-nodes", "net-gsp-nodes"]) {
+        m.on("mousemove", layer, (e) => {
+          const f = e.features?.[0];
+          if (!f) return;
+          const p = f.properties as { kind: string; name: string; stuck_mw: number; queue_mw: number; site_count: number };
+          const what = p.kind === "node_gsp" ? "Grid supply point" : "Bulk supply point";
+          nodeTip
+            .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
+            .setHTML(`<strong>${escapeHtml(p.name)}</strong><br/><span style="color:#5f5e5a">${what} · ${Number(p.stuck_mw).toFixed(1)} MW stuck · ${Number(p.queue_mw).toFixed(1)} MW queued · ${p.site_count} sites</span>`)
+            .addTo(m);
+        });
+        m.on("mouseleave", layer, () => nodeTip.remove());
+      }
+
       m.addLayer({
         id: "topo-nodes",
         type: "circle",
@@ -178,6 +237,19 @@ export default function MapView({ sites, display, visible, selectedId, highlight
           .addTo(m);
       });
       m.on("click", (e) => {
+        // Network nodes win over the dots under them: a GSP opens its card,
+        // a BSP selects its own board (when it is a site).
+        const nodes = m.queryRenderedFeatures(e.point, { layers: ["net-gsp-nodes", "net-bsp-nodes"] });
+        const gsp = nodes.find((f) => f.properties?.kind === "node_gsp");
+        if (gsp) {
+          latest.current.onSelectGsp?.(String(gsp.properties!.name));
+          return;
+        }
+        const bsp = nodes.find((f) => f.properties?.kind === "node_bsp" && f.properties?.site_id);
+        if (bsp) {
+          latest.current.onSelect(String(bsp.properties!.site_id));
+          return;
+        }
         // Generous hit target: anything within 8px of the click.
         const hits = visibleHits([
           [e.point.x - 8, e.point.y - 8],
@@ -214,6 +286,16 @@ export default function MapView({ sites, display, visible, selectedId, highlight
       );
     }
   }, [ready, sites, display, visible]);
+
+  // Draw / clear the whole network.
+  useEffect(() => {
+    if (ready && map.current) (map.current.getSource("network") as GeoJSONSource).setData(network ?? EMPTY);
+  }, [ready, network]);
+
+  // Story: fly to a chapter's view.
+  useEffect(() => {
+    if (ready && map.current && flyTo) map.current.flyTo({ center: flyTo.center, zoom: flyTo.zoom, duration: 1200 });
+  }, [ready, flyTo]);
 
   // Draw the selected site's upstream path.
   useEffect(() => {

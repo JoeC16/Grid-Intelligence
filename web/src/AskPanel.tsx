@@ -23,7 +23,7 @@ function inline(text: string): ReactNode[] {
   );
 }
 
-function Markdown({ text }: { text: string }) {
+export function Markdown({ text }: { text: string }) {
   const blocks: ReactNode[] = [];
   let list: { ordered: boolean; items: string[] } | null = null;
   const flush = () => {

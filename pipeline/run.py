@@ -2,7 +2,7 @@
 
 Usage:
     uv run python -m pipeline.run              # download missing raw data, then build
-    uv run python -m pipeline.run --refresh    # re-download everything first
+    uv run python -m pipeline.run --refresh    # take a new bronze snapshot (re-download everything) first
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import pandas as pd
 
 from .adapters.base import DNOAdapter
 from .adapters.ukpn import UKPNAdapter
+from . import medallion
 from .normalise import build_all
 from .score import load_config, print_all_tops, score, write_scores
 
@@ -23,30 +24,68 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "grid.duckdb"
 ADAPTERS: list[DNOAdapter] = [UKPNAdapter()]
 
 
+def _write(con: duckdb.DuckDBPyConnection, name: str, df: pd.DataFrame) -> None:
+    con.register("_df", df)
+    con.execute(f"CREATE OR REPLACE TABLE {name} AS SELECT * FROM _df")
+    con.unregister("_df")
+
+
+def _silver_for(adapter: DNOAdapter, signals, views) -> list[dict[str, pd.DataFrame]]:
+    """Silver rows for every bronze snapshot this adapter has."""
+    out = []
+    for day in adapter.snapshot_dates():
+        a = adapter if day == adapter.snapshot_date else adapter.for_snapshot(day)
+        try:
+            t = build_all(a)
+        except (FileNotFoundError, KeyError) as exc:  # an incomplete old snapshot
+            print(f"  skipping snapshot {day}: {type(exc).__name__}: {exc}")
+            continue
+        out.append(medallion.silver_snapshot(t, score(t["sites"], signals, views), day))
+    return out
+
+
 def build(adapters: list[DNOAdapter], db_path: Path = DB_PATH, refresh: bool = False) -> dict[str, pd.DataFrame]:
+    signals, views = load_config()
     tables: dict[str, list[pd.DataFrame]] = {}
+    silver_parts: list[dict[str, pd.DataFrame]] = []
     for adapter in adapters:
         adapter.download(refresh=refresh)
         for name, df in build_all(adapter).items():
             tables.setdefault(name, []).append(df)
+        silver_parts += _silver_for(adapter, signals, views)
     combined = {name: pd.concat(dfs, ignore_index=True) for name, dfs in tables.items()}
+    scores = score(combined["sites"], signals, views)
+    silver = {k: pd.concat([p[k] for p in silver_parts], ignore_index=True) for k in ("sites", "bsps", "gsps")}
+    silver["nodes"] = medallion.graph_nodes(combined, combined["field_sources"])
+    silver["edges"] = combined["edges"]
+    latest = adapters[0].snapshot_date
+    from_year = int(latest[:4]) if latest[:4].isdigit() else pd.Timestamp.now().year
+    gold = medallion.build_gold(combined, scores, silver, adapters[0].default_scenario, from_year)
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with duckdb.connect(str(db_path)) as con:
+        # Current tables the app reads (gold, unqualified names).
         for name, df in combined.items():
-            con.register("_df", df)
-            con.execute(f"CREATE OR REPLACE TABLE {name} AS SELECT * FROM _df")
-            con.unregister("_df")
-        signals, views = load_config()
-        write_scores(con, score(combined["sites"], signals, views), views)
+            _write(con, name, df)
+        write_scores(con, scores, views)
+        con.execute("CREATE SCHEMA IF NOT EXISTS silver")
+        con.execute("CREATE SCHEMA IF NOT EXISTS gold")
+        for name, df in silver.items():
+            _write(con, f"silver.{name}", df)
+        for name, df in gold.items():
+            _write(con, f"gold.{name}", df)
+    combined["_silver_snapshots"] = pd.DataFrame({"snapshot_date": sorted(silver["sites"]["snapshot_date"].unique())})
+    combined.update({f"gold.{k}": v for k, v in gold.items()})
     return combined
 
 
 def summary(tables: dict[str, pd.DataFrame]) -> None:
     sites = tables["sites"]
     print(f"\nWrote {DB_PATH}")
+    snaps = tables.pop("_silver_snapshots")["snapshot_date"].tolist()
+    print(f"  bronze snapshots in silver: {snaps}")
     for name, df in tables.items():
-        print(f"  {name:20s} {len(df):6,} rows")
+        print(f"  {name:28s} {len(df):6,} rows")
     print(f"\nsites: {len(sites)} substations, {sites['scorable'].sum()} scorable")
     print("  filled per signal column:")
     for col in ["firm_capacity_mw", "demand_headroom_mw", "observed_peak_mw",

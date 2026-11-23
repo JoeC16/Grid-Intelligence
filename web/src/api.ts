@@ -208,3 +208,48 @@ export interface BspRow {
 }
 
 export const fetchBsps = () => get<{ count: number; bsps: BspRow[]; source: Source | null }>("/bsps");
+
+export interface StoryChapter {
+  id: string;
+  number: number;
+  title: string;
+  body: string;
+  facts: { label: string; value: number; unit: string }[];
+  sources: Source[];
+  focus: {
+    view: "investor" | "developer";
+    sort?: "score" | "stuck" | "bsp";
+    network: boolean;
+    center: [number, number];
+    zoom: number;
+    select?: string;
+    highlight?: string[];
+  };
+}
+
+export const fetchStory = () => get<{ chapters: StoryChapter[]; snapshots: string[]; scenario: string }>("/story");
+export const fetchNetwork = () => get<GeoJSON.FeatureCollection>("/network");
+
+export interface GspRow {
+  gsp: string;
+  licence_area: string | null;
+  lat: number | null;
+  lon: number | null;
+  site_count: number;
+  bsp_count: number;
+  queue_mw: number;
+  primary_queue_mw: number;
+  grid_level_queue_mw: number;
+  stuck_mw: number;
+  stuck_rank: number | null;
+  large_demand_count: number;
+  large_demand_mva: number;
+  sites_limited_by_bsp: number;
+  sites_running_out_by: number;
+  running_out_by_year: number;
+  earliest_runs_out_year: number | null;
+  import_capacity_utilisation_pct: number | null;
+  in_gsp_list: boolean;
+}
+
+export const fetchGsps = () => get<{ count: number; gsps: GspRow[] }>("/gsps");

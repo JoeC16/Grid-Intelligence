@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchBsps, fetchMeta, fetchSite, fetchSites, type BspRow, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON } from "./api";
+import { fetchBsps, fetchGsps, fetchMeta, fetchNetwork, fetchSite, fetchSites, fetchStory, type BspRow, type GspRow, type StoryChapter, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON } from "./api";
 import AskPanel from "./AskPanel";
 import { gradientCss, rampFor, scoreColor, UNSCORED, type Ramp } from "./colors";
 import { LoadInput, Segmented, WeightsPanel } from "./Controls";
@@ -8,12 +8,14 @@ import Footer from "./Footer";
 import MapView, { type Display } from "./MapView";
 import RankList from "./RankList";
 import BspList from "./BspList";
+import GspCard from "./GspCard";
+import StoryPanel from "./StoryPanel";
 import { colourPosition, describe, rankByScore, rankBySiteBsp, rankByStuck, rankForLoad, type Mode, type Ranking } from "./ranking";
 import type { Weights } from "./scoring";
 import SidePanel, { type Headline } from "./SidePanel";
 
 const INITIAL_FILTERS: Filters = { licenceAreas: [], voltages: [], minScore: 0 };
-type Panel = "none" | "ranking" | "weights" | "ask";
+type Panel = "none" | "ranking" | "weights" | "ask" | "story";
 
 const mw = (v: number | null | undefined) =>
   v == null ? "—" : v.toLocaleString("en-GB", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
@@ -69,6 +71,16 @@ export default function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false); // phones only; always shown from sm up
+  // Phase 10: network view and story
+  const [showNetwork, setShowNetwork] = useState(false);
+  const [networkData, setNetworkData] = useState<GeoJSON.FeatureCollection | null>(null);
+  const [gspRows, setGspRows] = useState<GspRow[]>([]);
+  const [selectedGsp, setSelectedGsp] = useState<string | null>(null);
+  const [story, setStory] = useState<StoryChapter[] | null>(null);
+  const [storyIndex, setStoryIndex] = useState(0);
+  const [storyError, setStoryError] = useState<string | null>(null);
+  const [storyHighlight, setStoryHighlight] = useState<string[]>([]);
+  const [flyTo, setFlyTo] = useState<{ center: [number, number]; zoom: number; key: number } | null>(null);
   const [askResult, setAskResult] = useState<QueryResult | null>(null);
   const askIds = useMemo(() => askResult?.sites.map((s) => s.site_id) ?? [], [askResult]);
 
@@ -149,6 +161,33 @@ export default function App() {
     for (const g of byPoint.values()) if (g.length > 1) for (const id of g) out.set(id, g.filter((o) => o !== id));
     return out;
   }, [allSites]);
+
+  // Load the network (and GSP marts) the first time it's needed.
+  useEffect(() => {
+    if (!(showNetwork || selectedGsp) || networkData) return;
+    fetchNetwork().then(setNetworkData).catch((e) => setError(String(e)));
+    fetchGsps().then((d) => setGspRows(d.gsps)).catch((e) => setError(String(e)));
+  }, [showNetwork, selectedGsp, networkData]);
+
+  // Load the story when its panel first opens.
+  useEffect(() => {
+    if (panel !== "story" || story) return;
+    fetchStory().then((d) => setStory(d.chapters)).catch((e) => setStoryError(String(e)));
+  }, [panel, story]);
+
+  // Apply a chapter's focus: view, ranking, network, selection, rings, camera.
+  useEffect(() => {
+    const c = panel === "story" ? story?.[storyIndex] : undefined;
+    if (!c) return;
+    const f = c.focus;
+    setViewKey(f.view);
+    if (f.sort) setInvestorSort(f.sort);
+    setShowNetwork(f.network);
+    setSelectedGsp(null);
+    setSelectedId(f.select ?? null);
+    setStoryHighlight(f.highlight ?? []);
+    setFlyTo({ center: f.center, zoom: f.zoom, key: Date.now() });
+  }, [panel, story, storyIndex]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -322,6 +361,12 @@ export default function App() {
                 Filters
               </ToolbarButton>
             </span>
+            <ToolbarButton active={panel === "story"} onClick={() => togglePanel("story")}>
+              Story
+            </ToolbarButton>
+            <ToolbarButton active={showNetwork} onClick={() => setShowNetwork((v) => !v)}>
+              Network
+            </ToolbarButton>
             <ToolbarButton active={panel === "ask"} onClick={() => togglePanel("ask")}>
               Ask
             </ToolbarButton>
@@ -346,8 +391,14 @@ export default function App() {
           display={display}
           visible={visible}
           selectedId={selectedId}
-          highlightIds={panel === "ask" ? askIds : []}
+          highlightIds={panel === "ask" ? askIds : panel === "story" ? storyHighlight : []}
           topology={topology}
+          network={showNetwork ? networkData : null}
+          flyTo={flyTo}
+          onSelectGsp={(g) => {
+            setSelectedId(null);
+            setSelectedGsp(g);
+          }}
           onSelect={setSelectedId}
         />
 
@@ -382,6 +433,11 @@ export default function App() {
             />
           </div>
         )}
+        {panel === "story" && (
+          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36">
+            <StoryPanel chapters={story} index={storyIndex} onIndex={setStoryIndex} error={storyError} onClose={() => setPanel("none")} />
+          </div>
+        )}
         {panel === "ask" && (
           <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36">
             <AskPanel
@@ -402,6 +458,11 @@ export default function App() {
         {error && !selectedId && (
           <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-800 shadow">
             {error}. Is the API running?
+          </div>
+        )}
+        {!selectedId && selectedGsp && gspRows.find((g) => g.gsp === selectedGsp) && (
+          <div className="absolute inset-y-0 right-0 z-10 w-full sm:w-auto">
+            <GspCard gsp={gspRows.find((g) => g.gsp === selectedGsp)!} onClose={() => setSelectedGsp(null)} />
           </div>
         )}
         {selectedId && (

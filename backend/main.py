@@ -26,6 +26,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 
 from backend import assistant
+from backend.story import build_story
 from pipeline.score import load_config
 
 load_dotenv()  # local fallback only; in the cloud environment keys come from env vars
@@ -77,6 +78,13 @@ def _load() -> dict[str, pd.DataFrame]:
             "sites": sites,
             "gsps": con.execute("SELECT * FROM gsps").df(),
             "bsps": con.execute("SELECT * FROM bsps").df(),
+            "edges": con.execute("SELECT * FROM edges").df(),
+            "site_scores": con.execute("SELECT * FROM site_scores").df(),
+            "headroom_scenarios": con.execute("SELECT * FROM headroom_scenarios").df(),
+            "large_demand": con.execute("SELECT * FROM large_demand").df(),
+            **{f"gold_{t}": con.execute(f"SELECT * FROM gold.{t}").df()
+               for t in ("gsp_mart", "bsp_mart", "headroom_timeline", "large_demand_by_year", "changes")},
+            "snapshots": sorted(con.execute("SELECT DISTINCT snapshot_date FROM silver.sites").df()["snapshot_date"]),
             "weights": con.execute("SELECT * FROM score_weights").df(),
             "sources": con.execute("SELECT * FROM field_sources").df(),
         }
@@ -428,3 +436,70 @@ def list_bsps() -> dict:
     rows = [{k: _clean(v) for k, v in r.items()} | {"site_ids": children.get(r["bsp_id"], [])}
             for r in data["bsps"][cols].to_dict("records")]
     return {"count": len(rows), "bsps": rows, "source": _source(sites["dno"].iloc[0], "bsp_headroom_mw")}
+
+
+# -------------------------------------------------------- story / network --
+
+
+@app.get("/story")
+def story() -> dict:
+    """The Fuse story: chapters built from the gold layer, each with sources and a map focus."""
+    data = _load()
+    dno = data["sites"]["dno"].iloc[0]
+    out = build_story(data, lambda f: _source(dno, f), data["snapshots"])
+    return _jsonable(out)
+
+
+@app.get("/gsps")
+def list_gsps() -> dict:
+    """GSP mart: the same core measures as sites and BSPs, rolled up to grid supply points."""
+    rows = [{k: _clean(v) for k, v in r.items()} for r in _load()["gold_gsp_mart"].to_dict("records")]
+    return {"count": len(rows), "gsps": rows}
+
+
+@app.get("/network")
+def network() -> dict:
+    """The whole GSP → BSP → primary tree as GeoJSON: edges (lines) and BSP/GSP nodes (points)."""
+    data = _load()
+    sites = data["sites"].set_index("site_id")
+    bsps = data["bsps"].set_index("bsp_id")
+    gsps = data["gold_gsp_mart"].dropna(subset=["lat", "lon"]).set_index("gsp")
+
+    def xy(node_id: str):
+        if node_id.startswith("GSP:"):
+            g = node_id[4:]
+            return [float(gsps.at[g, "lon"]), float(gsps.at[g, "lat"])] if g in gsps.index else None
+        if node_id.startswith("BSP:"):
+            if node_id in bsps.index and pd.notna(bsps.at[node_id, "lat"]):
+                return [float(bsps.at[node_id, "lon"]), float(bsps.at[node_id, "lat"])]
+            return None
+        return [float(sites.at[node_id, "lon"]), float(sites.at[node_id, "lat"])] if node_id in sites.index else None
+
+    features = []
+    for e in data["edges"].itertuples():
+        a, b = xy(e.child_id), xy(e.parent_id)
+        if a and b and a != b:
+            features.append({"type": "Feature", "properties": {"kind": f"edge_{e.kind}"},
+                             "geometry": {"type": "LineString", "coordinates": [a, b]}})
+    for bsp_id, r in bsps.iterrows():
+        if pd.notna(r["lat"]):
+            features.append({"type": "Feature", "properties": {
+                "kind": "node_bsp", "id": bsp_id, "name": r["name"], "site_id": _clean(r["site_id"]),
+                "stuck_mw": _clean(r["stuck_mw"]) or 0, "queue_mw": _clean(r["queue_mw"]),
+                "headroom_mw": _clean(r["headroom_mw"]), "site_count": int(r["site_count"])},
+                "geometry": {"type": "Point", "coordinates": [float(r["lon"]), float(r["lat"])]}})
+    for g, r in gsps.iterrows():
+        features.append({"type": "Feature", "properties": {
+            "kind": "node_gsp", "id": f"GSP:{g}", "name": g, "stuck_mw": _clean(r["stuck_mw"]) or 0,
+            "queue_mw": _clean(r["queue_mw"]), "large_demand_mva": _clean(r["large_demand_mva"]),
+            "bsp_count": int(r["bsp_count"]), "site_count": int(r["site_count"])},
+            "geometry": {"type": "Point", "coordinates": [float(r["lon"]), float(r["lat"])]}})
+    return {"type": "FeatureCollection", "features": features}
+
+
+def _jsonable(v):
+    if isinstance(v, dict):
+        return {k: _jsonable(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_jsonable(x) for x in v]
+    return _clean(v)

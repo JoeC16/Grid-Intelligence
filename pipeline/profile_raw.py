@@ -1,4 +1,4 @@
-"""Write docs/PROFILE.md from the raw parquet files in data/raw/.
+"""Write docs/PROFILE.md from the latest bronze snapshot (data/bronze/ukpn/<date>/).
 
 Usage:  uv run python -m pipeline.profile_raw
 """
@@ -11,7 +11,9 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-RAW = ROOT / "data" / "raw"
+from pipeline import bronze  # noqa: E402
+
+RAW = bronze.latest("UKPN") or ROOT / "data" / "raw"
 OUT = ROOT / "docs" / "PROFILE.md"
 
 PURPOSE = {

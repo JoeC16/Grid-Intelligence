@@ -21,9 +21,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from .. import bronze
 from .base import DNOAdapter, Source
 
-RAW_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
+DNO = "UKPN"
 PORTAL = "https://ukpowernetworks.opendatasoft.com/explore/dataset/"
 
 SITES_DS = "grid-and-primary-sites"
@@ -136,12 +137,12 @@ def _flatten(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-async def _download_one(client, dataset_id: str) -> dict:
+async def _download_one(client, dataset_id: str, out_dir: Path) -> dict:
     meta = await _with_retry(f"{dataset_id} meta", client.get_dataset, dataset_id)
     metas = (meta.model_dump().get("metas") or {}).get("default") or {}
     raw = await _with_retry(f"{dataset_id} export", client.export_data, dataset_id, format="json")
     df = _flatten(pd.DataFrame(json.load(io.BytesIO(raw))))
-    df.to_parquet(RAW_DIR / f"{dataset_id}.parquet", index=False)
+    df.to_parquet(out_dir / f"{dataset_id}.parquet", index=False)
     print(f"  {dataset_id}: {len(df):,} rows")
     return {
         "dataset_id": dataset_id,
@@ -154,20 +155,20 @@ async def _download_one(client, dataset_id: str) -> dict:
     }
 
 
-async def download_datasets(ids: list[str]) -> None:
+async def download_datasets(ids: list[str], out_dir: Path) -> None:
     from dotenv import load_dotenv
     from ukpyn import UKPNClient
 
     load_dotenv()
     if not os.getenv("UKPN_API_KEY"):
         raise SystemExit("UKPN_API_KEY is not set. Set it in the environment (or a local .env).")
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    manifest_path = RAW_DIR / "_manifest.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = out_dir / "_manifest.json"
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     async with UKPNClient(timeout=300) as client:
         for dataset_id in ids:
             print(f"Downloading {dataset_id} ...")
-            manifest[dataset_id] = await _download_one(client, dataset_id)
+            manifest[dataset_id] = await _download_one(client, dataset_id, out_dir)
             manifest_path.write_text(json.dumps(manifest, indent=2))
 
 
@@ -208,13 +209,34 @@ class UKPNAdapter(DNOAdapter):
     dno = "UKPN"
     default_scenario = DEFAULT_SCENARIO
 
-    def __init__(self, raw_dir: Path = RAW_DIR):
-        self.raw_dir = raw_dir
+    def __init__(self, raw_dir: Path | None = None):
+        # Read the latest bronze snapshot unless told otherwise.
+        self.raw_dir = raw_dir or bronze.latest(DNO) or bronze.snapshot_dir(DNO)
+
+    @property
+    def snapshot_date(self) -> str:
+        return self.raw_dir.name
+
+    def snapshot_dates(self) -> list[str]:
+        return [p.name for p in bronze.snapshots(DNO)]
+
+    def for_snapshot(self, snapshot_date: str) -> "UKPNAdapter":
+        return UKPNAdapter(bronze.BRONZE_ROOT / DNO.lower() / snapshot_date)
 
     def download(self, refresh: bool = False) -> None:
-        missing = [d for d in DATASETS if refresh or not (self.raw_dir / f"{d}.parquet").exists()]
+        """refresh=True takes a new snapshot (today's folder); otherwise fills gaps in the current one."""
+        if refresh:
+            self.raw_dir = bronze.snapshot_dir(DNO)
+            missing = list(DATASETS)
+        else:
+            missing = [d for d in DATASETS if not (self.raw_dir / f"{d}.parquet").exists()]
         if missing:
-            asyncio.run(download_datasets(missing))
+            asyncio.run(download_datasets(missing, self.raw_dir))
+            self._clear_caches()
+
+    def _clear_caches(self) -> None:
+        for name in ("_raw", "_manifest", "_heatmap", "_name_to_floc", "_name_to_site", "_table6"):
+            getattr(type(self), name).cache_clear()
 
     # -- raw access
 

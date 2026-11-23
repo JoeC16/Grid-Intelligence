@@ -89,6 +89,18 @@ class DNOAdapter(ABC):
     def download(self, refresh: bool = False) -> None:  # noqa: B027 - optional hook
         """Fetch raw data to local storage. No-op if the adapter reads live."""
 
+    # Bronze snapshots (Phase 10). Adapters without snapshots have exactly one.
+    @property
+    def snapshot_date(self) -> str:
+        return "current"
+
+    def snapshot_dates(self) -> list[str]:
+        return [self.snapshot_date]
+
+    def for_snapshot(self, snapshot_date: str) -> "DNOAdapter":
+        """An adapter reading the given snapshot."""
+        return self
+
     @abstractmethod
     def fetch_sites(self) -> pd.DataFrame:
         """One row per scorable substation. Columns: SITES_COLUMNS."""

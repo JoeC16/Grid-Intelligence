@@ -9,7 +9,7 @@ uv sync
 export UKPN_API_KEY=...            # or put it in a local .env (never committed)
 uv run python -m pipeline.run            # download missing raw data, build + score data/grid.duckdb
 uv run python -m pipeline.score          # re-score only (after editing config/weights.yaml)
-uv run python -m pipeline.run --refresh  # re-download everything first
+uv run python -m pipeline.run --refresh  # take a new dated bronze snapshot (re-download everything) first
 uv run python -m pipeline.profile_raw    # regenerate docs/PROFILE.md
 uv run pytest
 ```
@@ -32,7 +32,7 @@ Scoring ([docs/SCORING.md](docs/SCORING.md), config in `config/weights.yaml`):
 
 The web app repeats the investor maths in the browser (`web/src/scoring.ts`, kept in step with `pipeline/score.py`) so weight sliders, the stuck-MW sort and the developer load size re-rank live.
 
-See [docs/PROFILE.md](docs/PROFILE.md) for every dataset's columns, quirks, and how the joins work.
+Data layers (bronze snapshots → silver → gold marts) and how a number reaches the screen: [docs/DATA_MODEL.md](docs/DATA_MODEL.md). See [docs/PROFILE.md](docs/PROFILE.md) for every dataset's columns, quirks, and how the joins work.
 
 ## Deploy (Vercel)
 
