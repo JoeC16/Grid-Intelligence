@@ -98,6 +98,84 @@ function Row({ label, value, unit }: { label: string; value: number | null; unit
   );
 }
 
+function UpstreamSection({ site, onSelect }: { site: SiteDetail; onSelect: (id: string) => void }) {
+  const u = site.upstream;
+  const b = u.bsp;
+  const g = u.gsp;
+  const limit =
+    u.limiting_level === "bsp" ? "limited by its BSP" : u.limiting_level === "primary" ? "limited by this site" : u.limiting_level;
+  return (
+    <section className="mb-4 rounded-md border border-stone-200 p-3">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-500">Upstream</h3>
+      <div className="mt-1">
+        <Row label="This site: headroom after queue" value={u.headroom_after_queue_mw} unit="MW" />
+        {b ? (
+          <>
+            <p className="mt-2 text-xs font-medium text-stone-800">
+              BSP: {b.name}
+              {b.is_this_site && <span className="font-normal text-stone-500"> (this site is its own board)</span>}
+            </p>
+            {b.matched && b.headroom_mw != null ? (
+              <>
+                <Row label="Published headroom" value={b.headroom_mw} unit="MW" />
+                <Row label={`Queue under it (${b.site_count} sites)`} value={b.queue_mw} unit="MW" />
+                <Row label="Left after queue" value={b.headroom_after_queue_mw} unit="MW" />
+              </>
+            ) : (
+              <p className="text-[11px] text-stone-500">{b.note ?? "No published headroom for this BSP."}</p>
+            )}
+            <p className="text-[11px]">
+              {b.sources.map((x, i) => (
+                <span key={x.dataset_id}>
+                  {i > 0 && " + "}
+                  <SourceLink source={x} />
+                </span>
+              ))}
+            </p>
+          </>
+        ) : (
+          <p className="mt-2 text-xs text-stone-600">Fed directly from its grid supply point (no BSP).</p>
+        )}
+        <div className="mt-2 flex items-baseline justify-between border-t border-stone-100 pt-2 text-sm">
+          <span className="font-medium text-stone-800">Effective headroom</span>
+          <span className="tabular-nums font-semibold text-stone-900">
+            {fmt(u.effective_headroom_mw)} <span className="font-normal text-stone-500">MW</span>
+          </span>
+        </div>
+        {limit && <p className="text-right text-[11px] text-stone-500">{limit}</p>}
+        {g && (
+          <>
+            <p className="mt-2 text-xs font-medium text-stone-800">GSP: {g.name}</p>
+            <Row label="Import utilisation (peak / capacity)" value={g.import_capacity_utilisation_pct} unit="%" />
+            {u.gsp_over_capacity && <p className="text-[11px] font-medium text-stone-800">Published peak is at or above capacity.</p>}
+            <p className="text-[11px] text-stone-500">
+              Technical limits agreed with the system operator: {g.technical_limits_agreed == null ? "unknown" : g.technical_limits_agreed ? "yes" : "not yet"}
+            </p>
+            <p className="text-[11px]">
+              <SourceLink source={g.source} />
+            </p>
+          </>
+        )}
+      </div>
+      {site.siblings.length > 0 && (
+        <div className="mt-3 border-t border-stone-100 pt-2">
+          <p className="text-[11px] text-stone-500">Same BSP ({site.siblings.length}), most effective headroom first:</p>
+          <ul className="mt-1 space-y-0.5">
+            {site.siblings.map((x) => (
+              <li key={x.site_id}>
+                <button type="button" onClick={() => onSelect(x.site_id)} className="flex w-full justify-between gap-2 text-left text-xs text-stone-800 hover:underline">
+                  <span className="truncate">{x.name}</span>
+                  <span className="shrink-0 tabular-nums text-stone-500">{fmt(x.effective_headroom_mw)} MW</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function SidePanel({ site, headline, weights, colocated, onSelect, loading, error, onClose }: Props) {
   return (
     <aside className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:w-[380px]">
@@ -185,7 +263,9 @@ export default function SidePanel({ site, headline, weights, colocated, onSelect
               </div>
             )}
 
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-500">Signals</h3>
+            <UpstreamSection site={site} onSelect={onSelect} />
+
+            <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">Signals</h3>
             <p className="mt-1 text-[11px] text-stone-500">
               Bars: how stuck vs other UKPN primaries (100 = most stuck).
             </p>

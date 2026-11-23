@@ -50,6 +50,10 @@ export interface SiteProps {
   score: number | null;
   rank: number | null;
   developer_rank: number | null;
+  developer_rank_local: number | null;
+  effective_headroom_mw: number | null;
+  limiting_level: string | null;
+  bsp_id: string | null;
   queue_mw: number | null;
   demand_headroom_mw: number | null;
   headroom_after_queue_mw: number | null;
@@ -107,6 +111,23 @@ export interface SiteDetail {
   capacity: { firm_capacity_mw: number | null; observed_peak_mw: number | null; source: Source | null };
   headroom_2030: { values: { scenario: string; value: number | null; default: boolean }[]; source: Source | null };
   location_source: Source | null;
+  upstream: {
+    headroom_after_queue_mw: number | null;
+    effective_headroom_mw: number | null;
+    limiting_level: string | null;
+    upstream_constrained: boolean | null;
+    gsp_over_capacity: boolean | null;
+    bsp: {
+      bsp_id: string; name: string; lat: number | null; lon: number | null; site_id: string | null;
+      matched: boolean; note: string | null; site_count: number; headroom_mw: number | null; queue_mw: number;
+      headroom_after_queue_mw: number | null; stuck_mw: number | null; is_this_site: boolean; sources: Source[];
+    } | null;
+    gsp: {
+      name: string; lat: number | null; lon: number | null; import_capacity_utilisation_pct: number | null;
+      technical_limits_agreed: boolean | null; source: Source | null;
+    } | null;
+  };
+  siblings: { site_id: string; name: string; lat: number; lon: number; effective_headroom_mw: number | null; queue_mw: number | null }[];
   gsp_context: {
     name: string;
     site_count: number;
@@ -166,3 +187,24 @@ export async function askQuestion(question: string): Promise<QueryResult> {
   }
   return res.json() as Promise<QueryResult>;
 }
+
+export interface BspRow {
+  bsp_id: string;
+  name: string;
+  licence_area: string;
+  lat: number | null;
+  lon: number | null;
+  site_id: string | null;
+  gsp: string | null;
+  matched: boolean;
+  note: string | null;
+  headroom_mw: number | null;
+  site_count: number;
+  queue_mw: number;
+  headroom_after_queue_mw: number | null;
+  stuck_mw: number | null;
+  stuck_rank: number | null;
+  site_ids: string[];
+}
+
+export const fetchBsps = () => get<{ count: number; bsps: BspRow[]; source: Source | null }>("/bsps");

@@ -115,11 +115,11 @@ def test_search_by_score_matches_map_ranking():
 @needs_db
 def test_search_developer_matches_pipeline():
     sites = _load()["sites"]
-    out = assistant.search_sites(sites, _args(rank_by="headroom_after_queue", min_headroom_mw=50, limit=25))
-    assert out["total_matches"] == int(sites["developer_rank"].notna().sum())
-    for r in out["results"]:
-        stored = sites.loc[sites.site_id == r["site_id"], "developer_rank"].iloc[0]
-        assert r["result_rank"] == stored
+    for rank_by, col in [("effective_headroom", "developer_rank"), ("headroom_after_queue", "developer_rank_local")]:
+        out = assistant.search_sites(sites, _args(rank_by=rank_by, min_headroom_mw=50, limit=25))
+        assert out["total_matches"] == int(sites[col].notna().sum())
+        for r in out["results"]:
+            assert r["result_rank"] == sites.loc[sites.site_id == r["site_id"], col].iloc[0], (rank_by, r)
 
 
 @needs_db

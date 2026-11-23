@@ -81,6 +81,25 @@ UNMAPPED_GSP = "(unmapped)"
 # Large demand list technology labels -> common labels.
 LARGE_DEMAND_TECH = {"Large Demand": "large_demand", "Distributed Energy Resource": "der"}
 
+# Heatmap BSP name -> DFES grid-level substation name, where the names differ.
+# Each is backed by evidence: the grid substation is one of the BSP's own
+# children, or the name is a plain abbreviation. Groupings ("Worthing Grid
+# Total" = boards A and B) are deliberately not aliased: they stay unmatched.
+BSP_ALIASES = {
+    "Finsbury Market F 33kV": "Finsbury Mkt F 33kV",
+    "Bengeworth Road 33kV": "Bengeworth Rd Grid 33kV",
+    "Buckhurst Hill 33kV via Brimsdown": "Buckhurst Hill 33kV",
+    "Hackney Grid 66kV Black Bar": "Hackney Grid 66kV",
+    "Moscow Road 22kV": "Moscow Rd 22kV",
+    "Palmers Green Grid 33": "Palmers Grn Grid 33kV",
+    "Palmers Green Grid Total": "Palmers Grn Grid 33kV",
+    "Leicester Road 33": "Leicester Rd Grid 33kV",
+    "W. Weybridge 132/33": "West Weybridge Grid 33kV",
+    "Deptford 22kV": "Deptford West 22kV",
+    "Marston Grid 33": "Marston Rd Grid 33kV",
+    "Great Yarmouth Grid 33": "GT Yarmouth Grid 33kV",
+}
+
 RETRIES = 6
 
 
@@ -161,6 +180,14 @@ def _norm(name: str) -> str:
 
 def _gsp_key(name: str) -> str:
     return re.sub(r"\s+", " ", name.upper().replace("KV", "")).strip()
+
+
+def _bsp_key(name: str) -> str:
+    """Normalise a BSP / grid substation name: drop kV, voltages and filler words."""
+    k = name.lower().replace("kv", "")
+    k = re.sub(r"\b\d+(/\d+)?\b", "", k)
+    k = re.sub(r"\b(grid|total|group|main|local)\b", "", k)
+    return re.sub(r"\s+", " ", k).strip()
 
 
 def match_gsp(name: str, area: str, overview: set[str]) -> str | None:
@@ -359,8 +386,70 @@ class UKPNAdapter(DNOAdapter):
                 "lat": g["geo_point_2d_lat"],
                 "lon": g["geo_point_2d_lon"],
                 "import_capacity_utilisation_pct": g["import_capacity_utilisation"],
+                "technical_limit_rag": g["technical_limits_available"],
             }
         ).drop_duplicates("gsp")
+
+    # -- topology (Phase 8)
+
+    def fetch_topology(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """BSPs from the heatmap's `bsp` field, matched to DFES grid-level substations.
+
+        A matched BSP is almost always also a site on the map (its own 33 kV
+        board, for example); its headroom is then that site's published
+        headroom, so the same substation never shows two figures. DFES (current
+        year, default scenario) is the fallback when the BSP isn't a site.
+        """
+        hm = self._heatmap()
+        dfes = self._raw(DFES_DS)
+        grid = dfes[(dfes["category"] == "Demand Headroom") & dfes["physical_level"].isin(["GRID", "COMPARISON_GRID"])]
+        by_key = {}
+        for name, floc in zip(grid["substation_name"], grid["sitefunctionallocation"]):
+            by_key.setdefault(_bsp_key(name), (name, floc))
+        year = str(pd.Timestamp.now().year)
+        dfes_now = grid[(grid["year"] == year) & (grid["scenario"] == DEFAULT_SCENARIO)].groupby("sitefunctionallocation")["headroom_mw"].sum()
+        coords = grid.drop_duplicates("sitefunctionallocation").set_index("sitefunctionallocation")[
+            ["spatial_coordinates_lat", "spatial_coordinates_lon"]]
+
+        sites = self.fetch_sites().set_index("site_id")
+        site_headroom = self.fetch_headroom().set_index("site_id")["demand_headroom_mw"]
+
+        rows, links = [], []
+        for (bsp_name, area), kids in hm.groupby(["bsp", "area"]):
+            kid_ids = sorted(set(kids["site_id"]))
+            if bsp_name == "Direct":
+                links += [(sid, None) for sid in kid_ids]
+                continue
+            target = by_key.get(_bsp_key(BSP_ALIASES.get(bsp_name, bsp_name)))
+            if target:
+                floc = target[1]
+                bsp_id = f"BSP:{floc}"
+                own_site = floc if floc in sites.index else None
+                if own_site:
+                    headroom, source = site_headroom.get(own_site), HEATMAP_DS
+                else:
+                    headroom, source = dfes_now.get(floc), DFES_DS
+                lat, lon = coords.loc[floc].tolist() if floc in coords.index else (None, None)
+                note = None
+            else:
+                bsp_id = f"BSP:{area}:{bsp_name}"
+                own_site, headroom, source = None, None, None
+                lat = kids["latitude"].mean()
+                lon = kids["longitude"].mean()
+                note = "No published headroom found for this BSP (name doesn't match a grid substation)"
+            gsps = sites.loc[[k for k in kid_ids if k in sites.index], "gsp"].dropna()
+            gsp = sites.at[own_site, "gsp"] if own_site and pd.notna(sites.at[own_site, "gsp"]) else (
+                gsps.mode().iloc[0] if len(gsps) else None)
+            rows.append({
+                "bsp_id": bsp_id, "name": bsp_name, "licence_area": area, "lat": lat, "lon": lon,
+                "site_id": own_site, "gsp": gsp,
+                "headroom_mw": None if headroom is None or pd.isna(headroom) else float(headroom),
+                "headroom_source": source, "matched": target is not None, "note": note,
+            })
+            links += [(sid, bsp_id) for sid in kid_ids]
+        bsps = pd.DataFrame(rows).drop_duplicates("bsp_id")
+        link_df = pd.DataFrame(links, columns=["site_id", "bsp_id"]).drop_duplicates("site_id")
+        return bsps, link_df
 
     def sources(self) -> dict[str, Source]:
         def src(ds: str) -> Source:
@@ -382,4 +471,8 @@ class UKPNAdapter(DNOAdapter):
             "connections_last_year": hm,
             "headroom_2030_mw": src(DFES_DS),
             "large_demand": src(LARGE_DEMAND_DS),
+            # Phase 8: BSP headroom is the BSP's own site's published headroom
+            # (DFES current year where the BSP isn't a site; per-BSP source in bsps.headroom_source).
+            "bsp_headroom_mw": hm,
+            "gsp_utilisation": src(GSP_DS),
         }

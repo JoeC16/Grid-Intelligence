@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchMeta, fetchSite, fetchSites, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON } from "./api";
+import { fetchBsps, fetchMeta, fetchSite, fetchSites, type BspRow, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON } from "./api";
 import AskPanel from "./AskPanel";
 import { gradientCss, rampFor, scoreColor, UNSCORED, type Ramp } from "./colors";
 import { LoadInput, Segmented, WeightsPanel } from "./Controls";
@@ -7,7 +7,8 @@ import FilterBar from "./FilterBar";
 import Footer from "./Footer";
 import MapView, { type Display } from "./MapView";
 import RankList from "./RankList";
-import { colourPosition, describe, rankByScore, rankByStuck, rankForLoad, type Mode, type Ranking } from "./ranking";
+import BspList from "./BspList";
+import { colourPosition, describe, rankByScore, rankBySiteBsp, rankByStuck, rankForLoad, type Mode, type Ranking } from "./ranking";
 import type { Weights } from "./scoring";
 import SidePanel, { type Headline } from "./SidePanel";
 
@@ -57,7 +58,9 @@ export default function App() {
   const [allSites, setAllSites] = useState<SitesGeoJSON | null>(null);
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
   const [viewKey, setViewKey] = useState<"investor" | "developer">("investor");
-  const [investorSort, setInvestorSort] = useState<"score" | "stuck">("score");
+  const [investorSort, setInvestorSort] = useState<"score" | "stuck" | "bsp">("score");
+  const [upstreamOn, setUpstreamOn] = useState(true); // developer view: count BSP limits
+  const [bsps, setBsps] = useState<BspRow[]>([]);
   const [weights, setWeights] = useState<Weights | null>(null);
   const [loadMw, setLoadMw] = useState(50);
   const [panel, setPanel] = useState<Panel>(() => (window.innerWidth >= 900 ? "ranking" : "none"));
@@ -81,6 +84,9 @@ export default function App() {
         if (dev?.load_mw_default != null) setLoadMw(dev.load_mw_default);
       })
       .catch((e) => setError(String(e)));
+    fetchBsps()
+      .then((d) => setBsps(d.bsps))
+      .catch((e) => setError(String(e)));
     fetchSites(INITIAL_FILTERS)
       // Draw order: higher investor scores last, so they sit on top.
       .then((d) => setAllSites({ ...d, features: [...d.features].sort((a, b) => (a.properties.score ?? -1) - (b.properties.score ?? -1)) }))
@@ -89,7 +95,7 @@ export default function App() {
 
   const investor = meta?.views.find((v) => v.type === "weighted") ?? null;
   const developer = meta?.views.find((v) => v.type === "filter_rank") ?? null;
-  const mode: Mode = viewKey === "developer" ? "developer" : investorSort === "stuck" ? "stuck" : "score";
+  const mode: Mode = viewKey === "developer" ? "developer" : investorSort;
   const ramp = rampFor(viewKey);
 
   const props = useMemo(() => allSites?.features.map((f) => f.properties) ?? [], [allSites]);
@@ -98,8 +104,11 @@ export default function App() {
   // Investor score is always computed: it's shown as context in every mode.
   const scoreRanking = useMemo(() => (weights ? rankByScore(props, weights) : null), [props, weights]);
   const stuckRanking = useMemo(() => rankByStuck(props), [props]);
-  const loadRanking = useMemo(() => rankForLoad(props, loadMw), [props, loadMw]);
-  const ranking: Ranking | null = mode === "score" ? scoreRanking : mode === "stuck" ? stuckRanking : loadRanking;
+  const loadRanking = useMemo(() => rankForLoad(props, loadMw, upstreamOn), [props, loadMw, upstreamOn]);
+  const bspRanking = useMemo(() => rankBySiteBsp(props, bsps), [props, bsps]);
+  const ranking: Ranking | null =
+    mode === "score" ? scoreRanking : mode === "stuck" ? stuckRanking : mode === "bsp" ? bspRanking : loadRanking;
+  const selectedBspId = selectedId ? (byId.get(selectedId)?.bsp_id ?? null) : null;
 
   const display = useMemo<Display | null>(() => {
     if (!ranking) return null;
@@ -188,26 +197,74 @@ export default function App() {
         sources: stuckSources,
       };
     }
+    const up = detail?.site_id === p.site_id ? detail.upstream : undefined;
+    if (mode === "bsp") {
+      const b = up?.bsp;
+      return {
+        big: e ? mw(e.value) : b ? "0.0" : "—",
+        color,
+        label: b ? `MW stuck at its BSP, ${b.name}` : "MW stuck at its BSP",
+        sub: e
+          ? `BSP rank ${e.rank} of ${bspRanking.n} BSPs with stuck demand`
+          : p.bsp_id ? "Its BSP has no stuck demand, or its headroom isn't published" : "Fed directly from its GSP (no BSP)",
+        detail: b && b.headroom_mw != null
+          ? `Queue under the BSP ${mw(b.queue_mw)} MW (${b.site_count} sites) − BSP published headroom ${mw(b.headroom_mw)} MW, floored at 0`
+          : undefined,
+        secondary: scoreText,
+        sources: b?.sources,
+      };
+    }
     const devSources = detail?.site_id === p.site_id ? detail.developer.sources : undefined;
+    const value = upstreamOn ? p.effective_headroom_mw : p.headroom_after_queue_mw;
+    const bspPart = upstreamOn && up?.bsp?.headroom_after_queue_mw != null
+      ? `; BSP ${up.bsp.name}: ${mw(up.bsp.headroom_after_queue_mw)} MW left after its queue. The lower counts${p.limiting_level === "bsp" ? " (the BSP)" : " (this site)"}`
+      : "";
     return {
-      big: mw(p.headroom_after_queue_mw),
+      big: mw(value),
       color,
-      label: "MW of published headroom left after the queue",
+      label: upstreamOn ? "MW of published headroom left after the queue, counting its BSP" : "MW of published headroom left after the queue",
       sub: e
         ? `Rank ${e.rank} of ${loadRanking.n} sites with ≥ ${loadMw} MW published headroom`
         : `Not on the shortlist: ${mw(p.demand_headroom_mw)} MW published headroom is below ${loadMw} MW`,
-      detail: `Published headroom ${mw(p.demand_headroom_mw)} MW − queue ahead ${mw(p.queue_mw)} MW`,
+      detail: `This site: published headroom ${mw(p.demand_headroom_mw)} MW − queue ahead ${mw(p.queue_mw)} MW${bspPart}`,
       secondary: scoreText,
       sources: devSources,
     };
-  }, [selectedId, byId, ranking, ramp, investor, scoreRanking, stuckRanking, loadRanking, loadMw, mode, detail]);
+  }, [selectedId, byId, ranking, ramp, investor, scoreRanking, stuckRanking, loadRanking, bspRanking, loadMw, upstreamOn, mode, detail]);
+
+  // The selected site's upstream path, drawn on the map.
+  const topology = useMemo<GeoJSON.FeatureCollection | null>(() => {
+    if (!detail || detail.site_id !== selectedId) return null;
+    const here: [number, number] = [detail.lon, detail.lat];
+    const b = detail.upstream.bsp;
+    const g = detail.upstream.gsp;
+    const bspPt = b && b.lat != null && b.lon != null ? ([b.lon, b.lat] as [number, number]) : null;
+    const gspPt = g && g.lat != null && g.lon != null ? ([g.lon, g.lat] as [number, number]) : null;
+    const line = (a: [number, number], z: [number, number], kind: string): GeoJSON.Feature => ({
+      type: "Feature", properties: { kind }, geometry: { type: "LineString", coordinates: [a, z] } });
+    const point = (c: [number, number], kind: string): GeoJSON.Feature => ({
+      type: "Feature", properties: { kind }, geometry: { type: "Point", coordinates: c } });
+    const f: GeoJSON.Feature[] = [];
+    if (bspPt) {
+      if (!b?.is_this_site) f.push(line(here, bspPt, "path"));
+      for (const x of detail.siblings) f.push(line([x.lon, x.lat], bspPt, "sibling"));
+      if (gspPt) f.push(line(bspPt, gspPt, "path"));
+      f.push(point(bspPt, "bsp"));
+    } else if (gspPt) {
+      f.push(line(here, gspPt, "path"));
+    }
+    if (gspPt) f.push(point(gspPt, "gsp"));
+    return { type: "FeatureCollection", features: f };
+  }, [detail, selectedId]);
 
   const legend =
     mode === "score"
       ? { label: investor?.score_label ?? "Score", left: "0", mid: "50", right: "100", grey: "Not scored" }
       : mode === "stuck"
         ? { label: `Stuck demand rank (${stuckRanking.n} sites)`, left: `#${stuckRanking.n}`, right: "#1", grey: "No stuck demand" }
-        : { label: `Rank by MW left after queue (${loadRanking.n} sites)`, left: `#${loadRanking.n}`, right: "#1" };
+        : mode === "bsp"
+          ? { label: `BSP stuck demand rank (${bspRanking.n} BSPs)`, left: `#${bspRanking.n}`, right: "#1", grey: "BSP not stuck or not published" }
+          : { label: `Rank by MW left after queue (${loadRanking.n} sites)`, left: `#${loadRanking.n}`, right: "#1" };
 
   const listTitle =
     mode === "score" ? (investor?.score_label ?? "Ranking") : mode === "stuck" ? "Most stuck MW" : `Shortlist for a ${loadMw} MW load`;
@@ -216,7 +273,8 @@ export default function App() {
       ? "Weighted score, 0–100. Change the weights to re-rank."
       : mode === "stuck"
         ? "Queued demand beyond published headroom, largest first. Sites with none are not ranked."
-        : `Sites with at least ${loadMw} MW of published headroom, ranked by headroom left after the queue ahead.`;
+        : `Sites with at least ${loadMw} MW of published headroom, ranked by headroom left after the queue ahead${
+            upstreamOn ? ", counting the bulk supply point (BSP) above each site" : " (BSP limits ignored)"}.`;
 
   const togglePanel = (p: Panel) => setPanel((cur) => (cur === p ? "none" : p));
 
@@ -240,16 +298,25 @@ export default function App() {
                 label="Rank by"
                 value={investorSort}
                 onChange={(v) => {
-                  setInvestorSort(v as "score" | "stuck");
-                  if (v === "stuck" && panel === "weights") setPanel("ranking");
+                  setInvestorSort(v as "score" | "stuck" | "bsp");
+                  if (v !== "score" && panel === "weights") setPanel("ranking");
                 }}
                 options={[
                   { key: "score", label: "Score" },
                   { key: "stuck", label: "Most stuck MW", title: "Queued demand beyond published headroom" },
+                  { key: "bsp", label: "BSPs", title: "Bulk supply points by stuck MW" },
                 ]}
               />
             )}
-            {viewKey === "developer" && <LoadInput value={loadMw} onChange={setLoadMw} />}
+            {viewKey === "developer" && (
+              <>
+                <LoadInput value={loadMw} onChange={setLoadMw} />
+                <label className="flex items-center gap-1.5 text-xs text-stone-600" title="Use the lower of the site's and its bulk supply point's headroom after queue">
+                  <input type="checkbox" checked={upstreamOn} onChange={(e) => setUpstreamOn(e.target.checked)} className="accent-stone-900" />
+                  Count BSP limits
+                </label>
+              </>
+            )}
             <span className="sm:hidden">
               <ToolbarButton active={showFilters} onClick={() => setShowFilters((v) => !v)}>
                 Filters
@@ -280,6 +347,7 @@ export default function App() {
           visible={visible}
           selectedId={selectedId}
           highlightIds={panel === "ask" ? askIds : []}
+          topology={topology}
           onSelect={setSelectedId}
         />
 
@@ -287,7 +355,19 @@ export default function App() {
           <Legend ramp={ramp} {...legend} />
         </div>
 
-        {panel === "ranking" && ranking && visible && (
+        {panel === "ranking" && mode === "bsp" && visible && (
+          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36">
+            <BspList
+              bsps={bsps}
+              visibleSites={visible}
+              selectedBspId={selectedBspId}
+              // Select the BSP's own board if it is a site, else its first site.
+              onSelect={(b) => setSelectedId(b.site_id ?? b.site_ids[0] ?? null)}
+              onClose={() => setPanel("none")}
+            />
+          </div>
+        )}
+        {panel === "ranking" && mode !== "bsp" && ranking && visible && (
           <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36">
             <RankList
               key={mode}

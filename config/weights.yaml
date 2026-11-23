@@ -66,9 +66,12 @@ views:
   developer:
     type: filter_rank
     label: Developer
-    description: Sites with enough published headroom for the load, ranked by headroom left after the queue ahead.
+    description: Sites with enough published headroom for the load, ranked by headroom left after the queue ahead, counting the bulk supply point above.
     load_mw_default: 50
     # keep sites where demand_headroom_mw >= load size
     filter_column: demand_headroom_mw
-    # rank by headroom_after_queue_mw = demand_headroom_mw - queue_mw, highest first
-    rank_by: headroom_after_queue_mw
+    # rank by effective_headroom_mw = min(site headroom after queue, BSP headroom
+    # after the queue of every site under it), highest first (docs/SCORING.md)
+    rank_by: effective_headroom_mw
+    # ranking that ignores upstream limits (the UI's "ignore upstream" toggle)
+    rank_by_local: headroom_after_queue_mw

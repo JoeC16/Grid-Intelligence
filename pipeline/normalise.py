@@ -14,7 +14,10 @@ import re
 
 import pandas as pd
 
+from . import graph
 from .adapters.base import (
+    BSP_COLUMNS,
+    BSP_LINK_COLUMNS,
     FUTURE_HEADROOM_COLUMNS,
     GSP_QUEUE_COLUMNS,
     HEADROOM_COLUMNS,
@@ -160,11 +163,18 @@ def build_field_sources(adapter: DNOAdapter) -> pd.DataFrame:
 
 def build_all(adapter: DNOAdapter) -> dict[str, pd.DataFrame]:
     sites = build_sites(adapter)
+    gsp_list = adapter.fetch_gsps()
+    bsps, links = adapter.fetch_topology()
+    net = graph.build(sites, _check(bsps, BSP_COLUMNS, "fetch_topology bsps"),
+                      _check(links, BSP_LINK_COLUMNS, "fetch_topology links"), gsp_list)
+    sites = net["sites"]
     large_demand = build_large_demand(adapter)
     gsp_queue = _check(adapter.fetch_gsp_queue(), GSP_QUEUE_COLUMNS, "fetch_gsp_queue")
-    gsps = build_gsps(sites, adapter.fetch_gsps(), gsp_queue, large_demand).assign(dno=adapter.dno)
+    gsps = build_gsps(sites, gsp_list, gsp_queue, large_demand).assign(dno=adapter.dno)
     return {
         "sites": sites,
+        "bsps": net["bsps"].assign(dno=adapter.dno),
+        "edges": net["edges"].assign(dno=adapter.dno),
         "headroom_scenarios": build_headroom_scenarios(adapter),
         "gsps": gsps,
         "large_demand": large_demand,

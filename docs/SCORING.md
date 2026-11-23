@@ -104,8 +104,11 @@ both stories.
 
 1. **Load size** `L`, in MW. Default 50 (`load_mw_default`).
 2. **Filter:** keep sites where `demand_headroom_mw >= L`.
-3. **Rank** by `headroom_after_queue_mw = demand_headroom_mw − queue_mw`,
-   highest first: published headroom left after the demand already queued ahead.
+3. **Rank** by `effective_headroom_mw`, highest first: published headroom left
+   after the queue ahead, counting the bulk supply point (BSP) above the site
+   (see Upstream constraints below). With "Count BSP limits" off, rank by
+   `headroom_after_queue_mw = demand_headroom_mw − queue_mw` instead
+   (`rank_by_local`, stored as `developer_rank_local`).
 
 Stored at the default load as `site_scores.developer_rank` (null = not
 eligible). In the web app the load size is an input; the shortlist re-ranks as
@@ -117,7 +120,40 @@ filter and still have less than `L` left after the queue, or a negative figure;
 it then ranks low rather than dropping out. At 50 MW, 18 of the 70 eligible
 sites have less than 50 MW left after the queue, and 4 are negative (lowest:
 Northfleet East 33kV, 95.2 MW headroom − 399 MW queued = −303.8 MW). Filtering
-on `headroom_after_queue_mw >= L` instead would drop these.
+on `headroom_after_queue_mw >= L` instead would drop these. Counting BSP limits,
+29 of the 70 have less than 50 MW effectively left, 6 are negative, 37 are
+limited by their BSP rather than themselves, and 62 change rank.
+
+## Upstream constraints (network graph)
+
+Built by [`pipeline/graph.py`](../pipeline/graph.py) from the tree GSP → BSP → primary
+(each primary's BSP and GSP come from the capacity heatmap; see docs/PROFILE.md
+for coverage).
+
+| Column | Meaning |
+|---|---|
+| `bsp_headroom_mw` | Published headroom at the BSP. Almost every BSP is also a site on the map (its own 33 kV board, for example), so this is that site's published headroom: one substation, one figure. DFES current year, default scenario, only where the BSP isn't a site. |
+| `bsp_queue_mw` | Demand queued at every site under the BSP, its own board included. |
+| `bsp_headroom_after_queue_mw` | `bsp_headroom_mw − bsp_queue_mw` |
+| `effective_headroom_mw` | `min(site headroom after queue, BSP headroom after queue)` |
+| `limiting_level` | `primary`, `bsp`, or `primary (BSP not published)` |
+| `gsp_over_capacity` | The GSP's published import utilisation (peak ÷ capacity) is 100% or more. GSPs publish no MW headroom, so this is a flag, not a limit. |
+
+Example: Kingston Grid 33kV has 116.1 MW published headroom and nothing queued
+locally, but 5.8 MW is queued across the 7 sites under Kingston Grid BSP, so its
+effective headroom is 110.3 MW, limited by the BSP.
+
+The GSP overview's technical-limits RAG says whether limits have been agreed
+with the system operator yet ("RED" = not yet). It is shown, but is not a
+constraint signal.
+
+### BSPs by stuck MW (investor view)
+
+`bsps.stuck_mw = max(bsp_queue_mw − bsp_headroom_mw, 0)`: queued demand the BSP
+itself can't absorb. Ranked largest first (`bsps.stuck_rank`); 28 BSPs have
+some. Northfleet East is first: 422.2 MW queued under it against 95.2 MW of
+published headroom, 327.0 MW stuck. BSPs with no published headroom aren't
+ranked.
 
 ## Changing the scoring
 

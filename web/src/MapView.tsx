@@ -20,6 +20,8 @@ interface Props {
   selectedId: string | null;
   /** Sites to ring on the map, e.g. the ones an AI answer names. */
   highlightIds?: string[];
+  /** Upstream path of the selected site: lines (kind "path" | "sibling") and BSP/GSP points (kind "bsp" | "gsp"). */
+  topology?: GeoJSON.FeatureCollection | null;
   onSelect: (siteId: string | null) => void;
 }
 
@@ -31,7 +33,9 @@ const COLOR = ["coalesce", ["feature-state", "color"], UNSCORED] as unknown as m
 const unlessHidden = (on: number): maplibregl.ExpressionSpecification =>
   ["case", ["boolean", ["feature-state", "hidden"], false], 0, on] as unknown as maplibregl.ExpressionSpecification;
 
-export default function MapView({ sites, display, visible, selectedId, highlightIds = [], onSelect }: Props) {
+const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+
+export default function MapView({ sites, display, visible, selectedId, highlightIds = [], topology = null, onSelect }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
   const [ready, setReady] = useState(false);
@@ -68,6 +72,23 @@ export default function MapView({ sites, display, visible, selectedId, highlight
       const byZoom = (extra: number) =>
         ["interpolate", ["linear"], ["zoom"], ...RADII.map((v, i) => (i % 2 ? v + extra : v))] as unknown as maplibregl.ExpressionSpecification;
 
+      // Upstream lines sit under the dots; BSP/GSP markers go on top (added below).
+      m.addSource("topology", { type: "geojson", data: EMPTY });
+      // Dash patterns can't be data-driven, so siblings and the path are separate layers.
+      m.addLayer({
+        id: "topo-siblings",
+        type: "line",
+        source: "topology",
+        filter: ["==", ["get", "kind"], "sibling"],
+        paint: { "line-color": INK, "line-width": 1, "line-opacity": 0.35, "line-dasharray": [2, 2] },
+      });
+      m.addLayer({
+        id: "topo-path",
+        type: "line",
+        source: "topology",
+        filter: ["==", ["get", "kind"], "path"],
+        paint: { "line-color": INK, "line-width": 2, "line-opacity": 0.8 },
+      });
       m.addLayer({
         id: "sites",
         type: "circle",
@@ -92,6 +113,18 @@ export default function MapView({ sites, display, visible, selectedId, highlight
           "circle-stroke-color": INK,
           "circle-stroke-width": 1.5,
           "circle-stroke-opacity": 0.7,
+        },
+      });
+      m.addLayer({
+        id: "topo-nodes",
+        type: "circle",
+        source: "topology",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-radius": ["case", ["==", ["get", "kind"], "gsp"], 9, 7],
+          "circle-color": "#ffffff",
+          "circle-stroke-color": INK,
+          "circle-stroke-width": ["case", ["==", ["get", "kind"], "gsp"], 3.5, 2.5],
         },
       });
       m.addLayer({
@@ -181,6 +214,11 @@ export default function MapView({ sites, display, visible, selectedId, highlight
       );
     }
   }, [ready, sites, display, visible]);
+
+  // Draw the selected site's upstream path.
+  useEffect(() => {
+    if (ready && map.current) (map.current.getSource("topology") as GeoJSONSource).setData(topology ?? EMPTY);
+  }, [ready, topology]);
 
   // Ring the highlighted sites.
   useEffect(() => {

@@ -54,6 +54,7 @@ class View:
     load_mw_default: float = 0.0
     filter_column: str = ""
     rank_by: str = ""
+    rank_by_local: str = ""  # optional alternative ranking stored as <view>_rank_local
 
 
 def load_config(path: Path = WEIGHTS_PATH) -> tuple[list[Signal], list[View]]:
@@ -82,7 +83,8 @@ def load_config(path: Path = WEIGHTS_PATH) -> tuple[list[Signal], list[View]]:
         elif vtype == "filter_rank":
             views.append(View(k, vtype, v.get("label", k), v.get("description", ""),
                               load_mw_default=float(v["load_mw_default"]),
-                              filter_column=v["filter_column"], rank_by=v["rank_by"]))
+                              filter_column=v["filter_column"], rank_by=v["rank_by"],
+                              rank_by_local=v.get("rank_by_local", "")))
         else:
             raise ValueError(f"view {k}: unknown type {vtype!r}")
     if not views or views[0].type != "weighted":
@@ -134,10 +136,14 @@ def rank_desc(values: pd.Series) -> pd.Series:
     return values.round(3).rank(ascending=False, method="min").astype("Int64")
 
 
-def filter_rank(df: pd.DataFrame, view: View, load_mw: float) -> pd.Series:
-    """Rank (1 = best) among sites with filter_column >= load_mw; NA for the rest."""
+def filter_rank(df: pd.DataFrame, view: View, load_mw: float, local: bool = False) -> pd.Series:
+    """Rank (1 = best) among sites with filter_column >= load_mw; NA for the rest.
+
+    local=True ranks by view.rank_by_local (ignoring upstream limits) instead of view.rank_by.
+    """
     eligible = df[view.filter_column] >= load_mw
-    return rank_desc(df.loc[eligible, view.rank_by]).reindex(df.index)
+    col = view.rank_by_local if local else view.rank_by
+    return rank_desc(df.loc[eligible, col]).reindex(df.index)
 
 
 def stuck_rank(df: pd.DataFrame) -> pd.Series:
@@ -165,6 +171,9 @@ def score(sites: pd.DataFrame, signals: list[Signal], views: list[View]) -> pd.D
         else:
             df[f"{prefix}rank"] = filter_rank(df, v, v.load_mw_default)
             score_cols.append(f"{prefix}rank")
+            if v.rank_by_local:
+                df[f"{prefix}rank_local"] = filter_rank(df, v, v.load_mw_default, local=True)
+                score_cols.append(f"{prefix}rank_local")
     df["stuck_rank"] = stuck_rank(df)
     score_cols.append("stuck_rank")
 
@@ -176,7 +185,7 @@ def score(sites: pd.DataFrame, signals: list[Signal], views: list[View]) -> pd.D
 
     raw_cols = list(dict.fromkeys(
         [s.column for s in signals] + ["queue_mw", "headroom_after_queue_mw"]
-        + [v.rank_by for v in views if v.type == "filter_rank"]))
+        + [c for v in views if v.type == "filter_rank" for c in (v.rank_by, v.rank_by_local) if c]))
     keep = ["site_id", *score_cols, "signals_used", "score_missing", *pct_cols, *raw_cols]
     return df[keep].sort_values([score_cols[1], "site_id"]).reset_index(drop=True)
 
@@ -207,7 +216,8 @@ def print_top(con: duckdb.DuckDBPyConnection, view: View, n: int = 20, first: bo
                  f"ranked by {view.rank_by}")
         cols = f"""s.{prefix}rank AS rank, t.name, t.licence_area AS area, t.voltage AS kv, t.gsp,
                round(t.demand_headroom_mw, 1) AS headroom_mw, round(t.queue_mw, 1) AS queue_mw,
-               round(s.headroom_after_queue_mw, 1) AS after_queue_mw"""
+               round(s.headroom_after_queue_mw, 1) AS after_queue_mw,
+               round(s.effective_headroom_mw, 1) AS effective_mw, t.limiting_level AS limit"""
     top = con.execute(
         f"""
         SELECT {cols}

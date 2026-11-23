@@ -92,8 +92,10 @@ TOOLS = [
             "rank_by:\n"
             "- 'score': investor stuck-demand score, highest first\n"
             "- 'stuck_mw': stuck demand in MW, largest first (sites with none are excluded)\n"
-            "- 'headroom_after_queue': published headroom minus queue, highest first (developer view; "
-            "combine with min_headroom_mw = the load size to keep only sites with enough published headroom)\n"
+            "- 'effective_headroom': headroom left after the queue, counting the bulk supply point (BSP) above "
+            "the site, highest first. This is the developer view on the map; combine with min_headroom_mw = the "
+            "load size to keep only sites with enough published headroom\n"
+            "- 'headroom_after_queue': the same but ignoring upstream (BSP) limits\n"
             "- 'distance': nearest first (needs near)\n"
             "Returns the total number of matches and the top results with their figures."
         ),
@@ -101,7 +103,7 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "rank_by": {"type": "string", "enum": ["score", "stuck_mw", "headroom_after_queue", "distance"]},
+                "rank_by": {"type": "string", "enum": ["score", "stuck_mw", "effective_headroom", "headroom_after_queue", "distance"]},
                 "near": _nullable({
                     "type": "object",
                     "properties": {
@@ -182,8 +184,8 @@ def search_sites(sites: pd.DataFrame, args: dict) -> dict:
         df = df[df["stuck_mw"] > 0]
     if rank_by == "distance" and not near:
         return {"error": "rank_by 'distance' needs near."}
-    sort_col = {"score": "score", "stuck_mw": "stuck_mw", "headroom_after_queue": "headroom_after_queue_mw",
-                "distance": "distance_km"}[rank_by]
+    sort_col = {"score": "score", "stuck_mw": "stuck_mw", "effective_headroom": "effective_headroom_mw",
+                "headroom_after_queue": "headroom_after_queue_mw", "distance": "distance_km"}[rank_by]
     df["result_rank"] = rank_desc(-df[sort_col] if rank_by == "distance" else df[sort_col])
     df = df.sort_values(["result_rank", "site_id"])
 
@@ -200,6 +202,9 @@ def search_sites(sites: pd.DataFrame, args: dict) -> dict:
             "published_headroom_mw": _num(r["demand_headroom_mw"]),
             "queue_mw": _num(r["queue_mw"]),
             "headroom_after_queue_mw": _num(r["headroom_after_queue_mw"]),
+            "effective_headroom_mw": _num(r.get("effective_headroom_mw")),
+            "limited_by": r.get("limiting_level"),
+            "bsp": r.get("bsp_name"),
             "stuck_mw": _num(r["stuck_mw"]),
             "stuck_demand_score": _num(r["score"]),
             "score_rank_ukpn": None if pd.isna(r["rank"]) else int(r["rank"]),

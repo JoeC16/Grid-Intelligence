@@ -73,7 +73,23 @@ class FakeAdapter(DNOAdapter):
             "licence_area": ["LPN", "SPN"],
             "lat": [51.55, 51.75],
             "lon": [-0.15, -0.35],
+            "import_capacity_utilisation_pct": [104.0, 20.0],
+            "technical_limit_rag": ["RED", "GREEN"],
         })
+
+    def fetch_topology(self):
+        # BSP:1 (published headroom 25 MW) feeds A and B; BSP:2 is unmatched and
+        # feeds D; C and E are fed directly from their GSP.
+        bsps = pd.DataFrame({
+            "bsp_id": ["BSP:1", "BSP:2"], "name": ["North Grid", "South Group"],
+            "licence_area": ["LPN", "SPN"], "lat": [51.56, 51.76], "lon": [-0.16, -0.36],
+            "site_id": [None, None], "gsp": ["NORTH", "SOUTH"],
+            "headroom_mw": [25.0, None], "headroom_source": ["fake-heatmap", None],
+            "matched": [True, False], "note": [None, "not published"],
+        })
+        links = pd.DataFrame({"site_id": ["A", "B", "C", "D", "E"],
+                              "bsp_id": ["BSP:1", "BSP:1", None, "BSP:2", None]})
+        return bsps, links
 
     def sources(self):
         s = Source("fake-heatmap", "2026-10-19", "https://example.org/fake-heatmap")

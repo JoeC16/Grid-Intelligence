@@ -40,13 +40,13 @@ def main() -> int:
     bow = sites.loc[sites["name"] == "Bow 11kV", "site_id"].iloc[0]
     questions = [
         ("Where could a 50 MW data centre connect fastest within 30 km of Slough?",
-         top_ids(sites, rank_by="headroom_after_queue", min_headroom_mw=50, near={**slough, "radius_km": 30})),
+         top_ids(sites, rank_by="effective_headroom", min_headroom_mw=50, near={**slough, "radius_km": 30})),
         ("Which substations have the most demand stuck in the queue?",
          top_ids(sites, rank_by="stuck_mw")),
         ("What are the five most constrained primary substations in London (LPN)?",
          top_ids(sites, rank_by="score", licence_areas=["LPN"])),
         ("Is there room for a 20 MW load within 20 km of Chelmsford?",
-         top_ids(sites, rank_by="headroom_after_queue", min_headroom_mw=20, near={**chelmsford, "radius_km": 20})),
+         top_ids(sites, rank_by="effective_headroom", min_headroom_mw=20, near={**chelmsford, "radius_km": 20})),
         ("Why does Bow 11kV score so high?", [bow]),
     ]
     passed = 0

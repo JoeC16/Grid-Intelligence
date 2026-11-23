@@ -60,7 +60,7 @@ Definitions: docs/SCORING.md and config/weights.yaml.
 - [x] Deploy: frontend and API together on Vercel (one FastAPI app, app.py) instead of Vercel + Fly.io/Railway. Live: https://grid-intelligence-psi.vercel.app. ANTHROPIC_API_KEY to be added in Vercel for the Ask box.
 - [x] README with setup, deploy, data sources and licences.
 
-## Phase 8 — Network graph: upstream constraints
+## Phase 8 — Network graph: upstream constraints ✅
 Model the network as a tree, GSP → BSP → primary, and let constraints flow through it. A primary can show published headroom while the bulk supply point (BSP) above it is already full; the map should say so.
 
 What the data supports (checked):
@@ -70,24 +70,25 @@ What the data supports (checked):
 - GSPs have no MW headroom figure; the GSP overview gives import utilisation % and a technical-limit RAG. Use those as flags, not as a MW limit.
 
 Tasks:
-- [ ] DNOAdapter gains fetch_topology(): nodes (GSP, BSP, primary) and edges (primary → BSP → GSP; Direct primaries → GSP), with each node's published headroom and source. UKPN name matching and aliases stay in adapters/ukpn.py.
-- [ ] graph.py (DNO-agnostic): build the tree, roll up children's queue and stuck MW to each BSP and GSP, and compute per primary:
+- [x] DNOAdapter gains fetch_topology(): nodes (GSP, BSP, primary) and edges (primary → BSP → GSP; Direct primaries → GSP), with each node's published headroom and source. UKPN name matching and aliases stay in adapters/ukpn.py.
+- [x] graph.py (DNO-agnostic): build the tree, roll up children's queue and stuck MW to each BSP and GSP, and compute per primary:
   - bsp_headroom_after_queue_mw = BSP published headroom − Σ queue of the primaries under it
   - effective_headroom_mw = min(primary headroom after queue, BSP headroom after queue)
   - upstream_constrained = the BSP is the tighter limit; gsp_flag = GSP technical limit RED or high utilisation
   - Unmatched BSPs flagged (effective headroom = primary only, with a note), never guessed.
-- [ ] DuckDB tables: nodes, edges, bsp_rollup, gsp_rollup; new columns on sites.
-- [ ] Developer view: filter and rank on effective (upstream-aware) headroom by default, with a toggle to ignore upstream limits. Investor score unchanged; upstream shown alongside it (see open questions).
-- [ ] Investor view: "Rank by" gains BSPs by stuck MW (rolled up).
-- [ ] UI: BSP nodes on the map with faint lines to their primaries when a site is selected; side panel "Upstream" section showing the path primary → BSP → GSP with each level's headroom, queue and sources; "Same BSP" list of sibling primaries.
-- [ ] docs/PROFILE.md: topology join coverage and unmatched BSPs. docs/SCORING.md: effective headroom.
-- [ ] Tests for graph.py with a small fixture (two BSPs, one Direct primary, one unmatched BSP).
+- [x] DuckDB tables: nodes, edges, bsp_rollup, gsp_rollup; new columns on sites.
+- [x] Developer view: filter and rank on effective (upstream-aware) headroom by default, with a toggle to ignore upstream limits. Investor score unchanged; upstream shown alongside it (see open questions).
+- [x] Investor view: "Rank by" gains BSPs by stuck MW (rolled up).
+- [x] UI: BSP nodes on the map with faint lines to their primaries when a site is selected; side panel "Upstream" section showing the path primary → BSP → GSP with each level's headroom, queue and sources; "Same BSP" list of sibling primaries.
+- [x] docs/PROFILE.md: topology join coverage and unmatched BSPs. docs/SCORING.md: effective headroom.
+- [x] Tests for graph.py with a small fixture (two BSPs, one Direct primary, one unmatched BSP).
 - Done when: every scorable primary has an upstream path or a flag saying why not; the developer shortlist accounts for BSP limits; the side panel shows the path with sources; coverage is reported.
 
-Open questions (decide before building):
-1. BSP "today" headroom: DFES gives yearly values from 2024. Use the current year (2026), Holistic Transition, to match the default scenario?
-2. Developer view: upstream-aware by default (recommended), or opt-in?
-3. Investor score: keep the six signals as they are and show upstream separately (recommended for now), or add an upstream signal such as BSP stuck MW?
+Decisions taken:
+1. BSP headroom = the BSP's own site's published headroom (157 of 158 matched BSPs are sites); DFES current year only as fallback. Changed from "DFES 2026" because that would show two different figures for one substation.
+2. Developer view counts BSP limits by default; "Count BSP limits" toggle turns it off.
+3. Investor score unchanged; upstream shown alongside, plus a "BSPs" ranking.
+4. GSP flag = published import utilisation ≥ 100%. The GSP technical-limits RAG means "limits agreed with NESO yet", not a constraint, so it isn't used as one.
 
 ## Phase 9 — Graph for the AI ask box
 Expose the same tree to the Ask box so it can answer relationship questions and cite the path. The graph is small (~1.2k nodes), so tools over the DuckDB tables are enough; no graph database.

@@ -135,4 +135,5 @@ def test_config_loads():
     dev = by_key["developer"]
     assert dev.type == "filter_rank"
     assert dev.load_mw_default == 50
-    assert (dev.filter_column, dev.rank_by) == ("demand_headroom_mw", "headroom_after_queue_mw")
+    assert (dev.filter_column, dev.rank_by, dev.rank_by_local) == (
+        "demand_headroom_mw", "effective_headroom_mw", "headroom_after_queue_mw")

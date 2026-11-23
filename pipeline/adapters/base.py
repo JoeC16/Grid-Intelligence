@@ -42,6 +42,22 @@ GSP_QUEUE_COLUMNS = [
     "gsp",       # GSP name, or "(unmapped)"
     "queue_mw",  # demand queued at grid level, i.e. not under any site in fetch_sites
 ]
+# Network topology (Phase 8). One row per bulk supply point (BSP).
+BSP_COLUMNS = [
+    "bsp_id",          # stable ID
+    "name",
+    "licence_area",
+    "lat",
+    "lon",
+    "site_id",         # the map site that is this BSP's own board, if any
+    "gsp",             # GSP name as in fetch_gsps(); None if unknown
+    "headroom_mw",     # published demand headroom at the BSP; None if not published
+    "headroom_source", # dataset ID the headroom came from
+    "matched",         # bool: the BSP was matched to a substation with published headroom
+    "note",            # why not matched, if not
+]
+# Which BSP each site hangs off. bsp_id None = fed directly from its GSP.
+BSP_LINK_COLUMNS = ["site_id", "bsp_id"]
 LARGE_DEMAND_COLUMNS = [
     "project_id",
     "licence_area",
@@ -99,7 +115,13 @@ class DNOAdapter(ABC):
 
     @abstractmethod
     def fetch_gsps(self) -> pd.DataFrame:
-        """GSP list with location: gsp, licence_area, lat, lon (one row per gsp)."""
+        """GSP list: gsp, licence_area, lat, lon, import_capacity_utilisation_pct,
+        technical_limit_rag ("GREEN" = technical limits agreed with the system operator,
+        "RED" = not yet; not a constraint signal). One row per gsp."""
+
+    @abstractmethod
+    def fetch_topology(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """(BSPs with BSP_COLUMNS, site→BSP links with BSP_LINK_COLUMNS)."""
 
     @abstractmethod
     def sources(self) -> dict[str, Source]:

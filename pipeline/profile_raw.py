@@ -151,6 +151,18 @@ Heatmap and LTDS 3a firm/peak figures disagree for most sites (different LTDS ed
 
 **DFES scenarios** in the dataset: Counterfactual, Holistic Transition, Electric Engagement, Hydrogen Evolution. Neither the data nor the metadata marks one as UKPN's central/best view, so Holistic Transition is the default.
 
+## Network topology (Phase 8)
+
+Tree: GSP → BSP → primary. Built by `pipeline/graph.py`; BSP matching lives in `adapters/ukpn.py`.
+
+- Every heatmap primary names its BSP (`bsp`) and GSP. DFES's `bulksupplypoint` agrees for 99.9% of primaries.
+- 94 primaries are "Direct": fed straight from the GSP.
+- BSP headroom: heatmap BSP names are matched to DFES grid-level substations (163 published) after normalising ("Grid", "132/33", "Total", kV). 170 BSPs: **158 matched**, 12 not. 157 of the matched are also sites on the map (the BSP's own board) and take that site's published headroom; 1 takes DFES current-year headroom.
+- 12 name aliases where the evidence is clear (the grid substation is one of the BSP's own children, or a plain abbreviation), e.g. "Moscow Road 22kV" → "Moscow Rd 22kV", "Great Yarmouth Grid 33" → "GT Yarmouth Grid 33kV".
+- **Unmatched BSPs** (no published headroom; sites under them are limited by their own headroom only and flagged): Bankside C Total, Bow GIS 132kV, Bow Total, Brighton Fishersgate, Brighton Local and Moulsecoomb Grid, Dartford Grid 33kV (two areas), Deptford Grid, Finsbury Market A, Grovehurst, Littlebrook Park 132/11, Worthing Grid Total. Most are groupings of several boards ("Total", "and"); their combined headroom isn't published.
+- Of 959 scorable sites: 839 under a BSP with published headroom, 94 direct-fed, 26 under an unmatched BSP.
+- GSPs: no MW headroom is published. `technical_limits_available` is a RAG for whether technical limits have been agreed with NESO yet (every RED row has "N/A" limits), not a constraint. The constraint flag uses `import_capacity_utilisation` ≥ 100% (Wimbledon 1&2 139%, Burwell 100%).
+
 ## GSP name crosswalk
 
 Resolved with evidence:

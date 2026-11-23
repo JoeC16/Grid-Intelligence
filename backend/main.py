@@ -69,13 +69,14 @@ def _load() -> dict[str, pd.DataFrame]:
         sites = con.execute(
             """
             SELECT t.*, s.* EXCLUDE (site_id, queue_mw, demand_headroom_mw,
-                                     connections_last_year, headroom_2030_mw)
+                                     connections_last_year, headroom_2030_mw, effective_headroom_mw)
             FROM sites t LEFT JOIN site_scores s USING (site_id)
             """
         ).df()
         return {
             "sites": sites,
             "gsps": con.execute("SELECT * FROM gsps").df(),
+            "bsps": con.execute("SELECT * FROM bsps").df(),
             "weights": con.execute("SELECT * FROM score_weights").df(),
             "sources": con.execute("SELECT * FROM field_sources").df(),
         }
@@ -178,7 +179,8 @@ def list_sites(
         df = df[df["score"].notna()]
 
     props = ["site_id", "name", "licence_area", "voltage", "gsp", "score", "rank",
-             "developer_rank", "stuck_rank", "queue_mw", "demand_headroom_mw", "headroom_after_queue_mw",
+             "developer_rank", "developer_rank_local", "stuck_rank", "queue_mw", "demand_headroom_mw",
+             "headroom_after_queue_mw", "effective_headroom_mw", "limiting_level", "bsp_id",
              "stuck_mw", "oversubscription", *PCT_COLS]
     features = [
         {
@@ -300,6 +302,8 @@ def get_site(site_id: str) -> dict:
         "headroom_2030": {"values": headroom_2030, "source": _source(dno, "headroom_2030_mw")},
         "location_source": _source(dno, "lat"),
         "gsp_context": gsp,
+        "upstream": _upstream(s, data, dno),
+        "siblings": _siblings(s, sites),
         "disclaimer": DISCLAIMER,
     }
 
@@ -355,3 +359,72 @@ def query(body: QueryIn) -> dict:
         "model": result.model,
         "disclaimer": DISCLAIMER,
     }
+
+
+# ------------------------------------------------------------- topology --
+
+
+def _upstream(s: dict, data: dict, dno: str) -> dict:
+    """The path site → BSP → GSP with each level's figures and sources."""
+    _, by_dataset = _sources()
+    bsp = None
+    if s.get("bsp_id"):
+        b = data["bsps"][data["bsps"]["bsp_id"] == s["bsp_id"]]
+        if not b.empty:
+            r = _row(b)
+            bsp = {
+                "bsp_id": r["bsp_id"], "name": r["name"], "lat": r["lat"], "lon": r["lon"], "site_id": r["site_id"],
+                "matched": r["matched"], "note": r["note"], "site_count": r["site_count"],
+                "headroom_mw": r["headroom_mw"], "queue_mw": r["queue_mw"],
+                "headroom_after_queue_mw": r["headroom_after_queue_mw"], "stuck_mw": r["stuck_mw"],
+                "is_this_site": r["site_id"] == s["site_id"],
+                "sources": [x for x in (by_dataset.get(r["headroom_source"]), _source(dno, "queue_mw")) if x],
+            }
+    gsp = None
+    if s.get("gsp"):
+        g = data["gsps"][(data["gsps"]["gsp"] == s["gsp"]) & (data["gsps"]["dno"] == dno)]
+        if not g.empty:
+            r = _row(g)
+            gsp = {
+                "name": r["gsp"], "lat": r["lat"], "lon": r["lon"],
+                "import_capacity_utilisation_pct": r.get("import_capacity_utilisation_pct"),
+                "technical_limits_agreed": None if r.get("technical_limit_rag") is None else r["technical_limit_rag"] == "GREEN",
+                "source": _source(dno, "gsp_utilisation"),
+            }
+    local = None if s.get("demand_headroom_mw") is None or s.get("queue_mw") is None else round(
+        s["demand_headroom_mw"] - s["queue_mw"], 3)
+    return {
+        "headroom_after_queue_mw": local,
+        "effective_headroom_mw": s.get("effective_headroom_mw"),
+        "limiting_level": s.get("limiting_level"),
+        "upstream_constrained": s.get("upstream_constrained"),
+        "gsp_over_capacity": s.get("gsp_over_capacity"),
+        "bsp": bsp,
+        "gsp": gsp,
+    }
+
+
+def _siblings(s: dict, sites: pd.DataFrame) -> list[dict]:
+    """Other sites on the same BSP, most effective headroom first."""
+    if not s.get("bsp_id"):
+        return []
+    sib = sites[(sites["bsp_id"] == s["bsp_id"]) & (sites["site_id"] != s["site_id"])]
+    sib = sib.sort_values("effective_headroom_mw", ascending=False, na_position="last")
+    return [
+        {"site_id": r["site_id"], "name": r["name"], "lat": _clean(r["lat"]), "lon": _clean(r["lon"]),
+         "effective_headroom_mw": _clean(r["effective_headroom_mw"]), "queue_mw": _clean(r["queue_mw"])}
+        for r in sib.to_dict("records")
+    ]
+
+
+@app.get("/bsps")
+def list_bsps() -> dict:
+    """Bulk supply points with rolled-up queue and stuck demand, and the sites under each."""
+    data = _load()
+    sites = data["sites"]
+    children = sites.dropna(subset=["bsp_id"]).groupby("bsp_id")["site_id"].apply(list).to_dict()
+    cols = ["bsp_id", "name", "licence_area", "lat", "lon", "site_id", "gsp", "matched", "note", "headroom_mw",
+            "headroom_source", "site_count", "queue_mw", "headroom_after_queue_mw", "stuck_mw", "stuck_rank"]
+    rows = [{k: _clean(v) for k, v in r.items()} | {"site_ids": children.get(r["bsp_id"], [])}
+            for r in data["bsps"][cols].to_dict("records")]
+    return {"count": len(rows), "bsps": rows, "source": _source(sites["dno"].iloc[0], "bsp_headroom_mw")}
