@@ -180,3 +180,35 @@ Plan:
 - Done when: Spain shows on the map with scores, a distributor ranking and sources, and its checks pass.
 - Phase 13 done (2026-11-24): `adapters/cnmc_es.py` reads the CNMC demand layers (6,182 busbars, 59 distributors, October 2026); licence CC BY-SA 4.0 per CNMC|Data terms (recorded in README, flagged for legal review); scores and ranks per country; "Nudo 0" busbars (408, undefined in the data) shown but not scored; utilisation = taken / (taken + published headroom); `gold.operator_mart` + `/operators` + Distributors panel (sortable, CSV); Country switch, Spain filters (distributors, voltage bands), Spain side panel; six Spain story chapters incl. "Around La Barona" (config/story.yaml); Ask box: country filter, Spanish municipality lookup, Spain prompt; checks per DNO (bbox, scorable share, topology checks only where published); refresh stores a bronze archive per DNO. Transmission (Red Eléctrica) layer kept in bronze, not shown yet.
 
+
+## Phase 14 — Spain network view: distribution busbars → transmission nodes
+Why: GB has a GSP → BSP → primary tree; Spain shows busbars only. The CNMC data does publish the link upward, just not in the demand layer.
+
+What the data supports (checked 2026-11-24):
+- The CNMC **generation** capacity layer (`Generacion_en_Distribucion` layer 4, 6,227 busbars) has `NUDO_AFECCION_RDT`: for each distribution busbar, the transmission node of majority influence, as named by its operator. 98.6% filled (537 distinct nodes); the gaps are small distributors.
+- 99.6% of demand busbars join to a generation row on operator + substation + voltage.
+- 85% of node names match a Red Eléctrica busbar in the transmission demand layer after cleanup (case, accents, "KV", brackets). The rest: abbreviations ("P.G.R."), two nodes in one cell, "NO APLICA".
+- The transmission layer gives demand capacity per node by evaluation criterion (CEP CAD1/CAD2, no-CEP), occupied, admitted not evaluated, and free bays. 60% of transmission busbars show 0 MW for new demand (e.g. LA PLANA 220 above Vall d'Alba, COSLADA 220).
+- Caveat: the link is published for generation access ("afección" for generation); it is the operator's own statement of which transmission node a busbar depends on, not a full feeder map. Labelled as such.
+
+Plan:
+- [x] Read the CNMC transmission demand spec (BOE-A-2025-25253) to label the CEP/CAD criteria correctly; pick the figure shown as "published transmission demand capacity".
+- [x] Bronze: add the generation layer to `adapters/cnmc_es.py`; `fetch_topology` returns transmission nodes as the upper level (like BSPs) and busbar → node links. Unmatched names kept as published, flagged, no line drawn; never guessed.
+- [x] Graph: effective headroom for Spain = min(busbar headroom after its queue, transmission node capacity after the queue of every busbar under it); limiting level "busbar" or "transmission".
+- [x] Network view for Spain (busbars → transmission nodes, coloured like GB's), node cards, the side panel Upstream section, "Rank by transmission nodes", Spain story chapter on upstream limits (incl. La Barona → LA PLANA 220).
+- [x] Checks: share linked, share of node names matched; tests with small fixtures.
+- Done when: Spain's Network button draws the busbar → transmission tree with sources, and the checks pass.
+- Phase 14 done (2026-11-24): CEP = demand through power electronics ≥ 20 MW (data centres, electrolysers); CAD1/CAD2 = with/without voltage-dip ride-through (CAD2 is 0 everywhere). Node headroom = no-CEP capacity − requests admitted at the node; CEP CAD1 shown alongside. 438 of 512 named nodes matched (85.5%); 4,828 of 5,772 scored busbars linked to a published node; 292 nodes at zero; 2,096 busbars limited by their node (296 with local headroom left). Spain: Network button, "Transmission" ranking, node cards, Upstream section, upstream story chapter, La Barona → LA PLANA 220 kV; Ask tools return nodes; checks per DNO (matched share ≥ 80%, upstream path ≥ 80%).
+
+## Phase 15 — Unlock planner: where new capacity unlocks the most
+Why: the best next move for a grid owner is the node where added capacity releases the most demand downstream. Upstream nodes (GB BSPs, Spain's transmission nodes) can unlock many sites at once; others unlock nothing until a large queue is cleared.
+
+What the data supports (checked on GB, 2026-11-24): per BSP, the queue beyond its published headroom and the spare published headroom at the primaries under it. E.g. +50 MW at Three Bridges opens 23 MW of new demand and 2 sites for a 10 MW load; Northfleet East needs ~327 MW just to serve its queue before anything new opens. Shared upstream capacity is not double-counted: new demand = min(spare at the sites, headroom left upstream).
+
+Plan:
+- [ ] `pipeline/unlock.py`: unlock curve per upstream node for added MW steps (0, 10, 25, 50, 100, 200, 350): queued demand served, new capacity opened, sites able to take a given load; MW needed before anything new opens; flag sites that would also need their own upgrade. Tests with small fixtures.
+- [ ] `gold.unlock_mart` + `/unlock`; ranking of best next moves (MW unlocked per MW added at each step), with a "serve the queue" / "open new capacity" toggle.
+- [ ] What-if graph viewer: pick a node, drag "add MW", downstream sites light up as they unlock; every figure links to its sources.
+- [ ] Story chapter: where reinforcement goes furthest (GB and Spain).
+- [ ] Caveats in the UI and docs/SCORING.md: screening, not an engineering study; published headroom is indicative; no power flow; no reinforcement costs (check the heatmap's budget estimates as a hint).
+- Done when: both countries show an unlock ranking and the what-if viewer, with sources and caveats.

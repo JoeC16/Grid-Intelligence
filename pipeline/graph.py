@@ -78,10 +78,11 @@ def build(sites: pd.DataFrame, bsps: pd.DataFrame, links: pd.DataFrame, gsps: pd
         if pd.notna(r["gsp"]):
             edges.append({"child_id": bsp_id, "parent_id": f"GSP:{r['gsp']}", "kind": "bsp"})
 
+    optional = [c for c in ("cep_mw", "occupied_mw", "admitted_mw", "free_bays") if c in b.columns]
     bsp_out = b.reset_index()[[
         "bsp_id", "name", "licence_area", "lat", "lon", "site_id", "gsp", "matched", "note",
         "headroom_mw", "headroom_source", "site_count", "queue_mw", "headroom_after_queue_mw",
-        "stuck_mw", "children_stuck_mw",
+        "stuck_mw", "children_stuck_mw", *optional,
     ]]
     bsp_out["stuck_rank"] = (
         bsp_out["stuck_mw"].where(bsp_out["stuck_mw"] > 0).round(3).rank(ascending=False, method="min").astype("Int64")

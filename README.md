@@ -80,7 +80,8 @@ Licence: the CNMC publishes its open data under [CC BY-SA 4.0](https://creativec
 | Dataset ID (our name) | CNMC layer | Used for | Licence |
 |---|---|---|---|
 | `cnmc-demanda-en-distribucion` | `Demanda_en_Distribucion` layer 4 | every distribution busbar above 1 kV: published headroom (firm demand access capacity available), capacity taken, requests admitted and not evaluated, distributor, location | CC BY-SA 4.0 |
-| `cnmc-demanda-en-transporte` | `Demanda_en_Transporte_v2` layer 11 | transmission busbars (stored in bronze, not shown yet) | CC BY-SA 4.0 |
+| `cnmc-demanda-en-transporte` | `Demanda_en_Transporte_v2` layer 11 | Red Eléctrica transmission nodes: demand capacity for ordinary and power-electronics (CEP) loads, taken, admitted, free bays (the upper level of Spain's network view) | CC BY-SA 4.0 |
+| `cnmc-generacion-en-distribucion` | `Generacion_en_Distribucion` layer 4 | only its "Nudo afección RdT" column: the transmission node each distribution busbar depends on, as named by its distributor (links busbars to nodes) | CC BY-SA 4.0 |
 | `cnmc-capacidad-periodo` | `Capacidad_Periodo` layer 10 | the month the figures describe | CC BY-SA 4.0 |
 
 Place names in the AI ask box are located with **OS Open Names** via [postcodes.io](https://postcodes.io/): contains OS data © Crown copyright and database right, licensed under the [Open Government Licence v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/). Only the place name is sent. Spanish places are looked up in the municipality names of the CNMC data itself (nothing is sent anywhere).

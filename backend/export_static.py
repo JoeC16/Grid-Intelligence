@@ -31,7 +31,6 @@ ENDPOINTS = {
     "sites": "/sites",
     "bsps": "/bsps",
     "gsps": "/gsps",
-    "network": "/network",
 }
 
 
@@ -41,6 +40,7 @@ def endpoints(client: TestClient) -> dict[str, str]:
     for c in client.get("/meta").json().get("countries", []):
         out[f"story-{c['code']}"] = f"/story?country={c['code']}"
         out[f"operators-{c['code']}"] = f"/operators?country={c['code']}"
+        out[f"network-{c['code']}"] = f"/network?country={c['code']}"
     return out
 
 

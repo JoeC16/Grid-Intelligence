@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { monthLabel, networkNames, fetchBsps, fetchGsps, fetchMeta, fetchNetwork, fetchOperators, fetchSite, fetchSites, fetchStory, type OperatorRow, type BspRow, type GspRow, type StoryChapter, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON, type Source } from "./api";
+import { monthLabel, networkNames, upperLevel, fetchBsps, fetchGsps, fetchMeta, fetchNetwork, fetchOperators, fetchSite, fetchSites, fetchStory, type OperatorRow, type BspRow, type GspRow, type StoryChapter, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON, type Source } from "./api";
 import AskPanel from "./AskPanel";
 import { gradientCss, rampFor, scoreColor, UNSCORED, type Ramp } from "./colors";
 import { LoadInput, Segmented, WeightsPanel } from "./Controls";
@@ -10,6 +10,7 @@ import RankList from "./RankList";
 import BspList from "./BspList";
 import GspCard from "./GspCard";
 import StoryPanel from "./StoryPanel";
+import NodeCard from "./NodeCard";
 import OperatorList from "./OperatorList";
 import { colourPosition, describe, rankByScore, rankBySiteBsp, rankByStuck, rankForLoad, type Mode, type Ranking } from "./ranking";
 import type { Weights } from "./scoring";
@@ -74,7 +75,9 @@ export default function App() {
   const [showFilters, setShowFilters] = useState(false); // phones only; always shown from sm up
   // Phase 10: network view and story
   const [showNetwork, setShowNetwork] = useState(false);
-  const [networkData, setNetworkData] = useState<GeoJSON.FeatureCollection | null>(null);
+  const [networks, setNetworks] = useState<Record<string, GeoJSON.FeatureCollection>>({});
+  const [bspSources, setBspSources] = useState<Record<string, Source | null>>({});
+  const [selectedNode, setSelectedNode] = useState<string | null>(null); // upper-level node with no site (Spain)
   const [gspRows, setGspRows] = useState<GspRow[]>([]);
   const [selectedGsp, setSelectedGsp] = useState<string | null>(null);
   // Phase 13: one country at a time (GB, ES); everything is ranked within the country shown.
@@ -104,7 +107,10 @@ export default function App() {
       })
       .catch((e) => setError(String(e)));
     fetchBsps()
-      .then((d) => setBsps(d.bsps))
+      .then((d) => {
+        setBsps(d.bsps);
+        setBspSources(d.sources ?? {});
+      })
       .catch((e) => setError(String(e)));
     fetchSites(INITIAL_FILTERS)
       // Draw order: higher investor scores last, so they sit on top.
@@ -120,7 +126,11 @@ export default function App() {
   const countryInfo = meta?.countries?.find((c) => c.code === country) ?? null;
   const hasTopology = countryInfo?.has_topology ?? true;
   const countryDnos = useMemo(() => (meta?.dnos ?? []).filter((d) => (d.country ?? "GB") === country), [meta, country]);
-  const siteWord = hasTopology ? "primaries" : "busbars";
+  const siteWord = countryInfo?.has_gsp === false ? "busbars" : "primaries";
+  const level = upperLevel(countryInfo); // "BSP" or "transmission node"
+  const Level = level === "BSP" ? "BSP" : "Transmission node";
+  const levels = level === "BSP" ? "BSPs" : "transmission nodes";
+  const networkData = networks[country] ?? null;
   // Only the country shown takes part in rankings, colours and lists.
   const props = useMemo(
     () => allSites?.features.map((f) => f.properties).filter((p) => (p.country ?? "GB") === country) ?? [],
@@ -139,6 +149,7 @@ export default function App() {
     setFilters(INITIAL_FILTERS);
     setSelectedId(null);
     setSelectedGsp(null);
+    setSelectedNode(null);
     setSelectedOperator(null);
     setStoryIndex(0);
     setStoryHighlight([]);
@@ -154,8 +165,8 @@ export default function App() {
   // Investor score is always computed: it's shown as context in every mode.
   const scoreRanking = useMemo(() => (weights ? rankByScore(props, weights) : null), [props, weights]);
   const stuckRanking = useMemo(() => rankByStuck(props), [props]);
-  const loadRanking = useMemo(() => rankForLoad(props, loadMw, upstreamOn), [props, loadMw, upstreamOn]);
-  const bspRanking = useMemo(() => rankBySiteBsp(props, bsps), [props, bsps]);
+  const loadRanking = useMemo(() => rankForLoad(props, loadMw, upstreamOn, level), [props, loadMw, upstreamOn, level]);
+  const bspRanking = useMemo(() => rankBySiteBsp(props, bsps, level), [props, bsps, level]);
   const ranking: Ranking | null =
     mode === "score" ? scoreRanking : mode === "stuck" ? stuckRanking : mode === "bsp" ? bspRanking : loadRanking;
   const selectedBspId = selectedId ? (byId.get(selectedId)?.bsp_id ?? null) : null;
@@ -203,9 +214,9 @@ export default function App() {
   // Load the network (and GSP marts) the first time it's needed.
   useEffect(() => {
     if (!(showNetwork || selectedGsp) || networkData) return;
-    fetchNetwork().then(setNetworkData).catch((e) => setError(String(e)));
+    fetchNetwork(country).then((d) => setNetworks((n) => ({ ...n, [country]: d }))).catch((e) => setError(String(e)));
     fetchGsps().then((d) => setGspRows(d.gsps)).catch((e) => setError(String(e)));
-  }, [showNetwork, selectedGsp, networkData]);
+  }, [showNetwork, selectedGsp, networkData, country]);
 
   // Load a country's story when its panel first opens.
   useEffect(() => {
@@ -293,12 +304,13 @@ export default function App() {
       return {
         big: e ? mw(e.value) : b ? "0.0" : "—",
         color,
-        label: b ? `MW stuck at its BSP, ${b.name}` : "MW stuck at its BSP",
+        label: b ? `MW stuck at its ${level}, ${b.name}` : `MW stuck at its ${level}`,
         sub: e
-          ? `BSP rank ${e.rank} of ${bspRanking.n} BSPs with stuck demand`
-          : p.bsp_id ? "Its BSP has no stuck demand, or its headroom isn't published" : "Fed directly from its GSP (no BSP)",
+          ? `${Level} rank ${e.rank} of ${bspRanking.n} ${levels} with stuck demand`
+          : p.bsp_id ? `Its ${level} has no stuck demand, or its headroom isn't published`
+          : level === "BSP" ? "Fed directly from its GSP (no BSP)" : "No transmission node published for this busbar",
         detail: b && b.headroom_mw != null
-          ? `Queue under the BSP ${mw(b.queue_mw)} MW (${b.site_count} sites) − BSP published headroom ${mw(b.headroom_mw)} MW, floored at 0`
+          ? `Queue under the ${level} ${mw(b.queue_mw)} MW (${b.site_count} sites) − its published headroom ${mw(b.headroom_mw)} MW, floored at 0`
           : undefined,
         secondary: scoreText,
         sources: b?.sources,
@@ -307,12 +319,12 @@ export default function App() {
     const devSources = detail?.site_id === p.site_id ? detail.developer.sources : undefined;
     const value = upstreamOn ? p.effective_headroom_mw : p.headroom_after_queue_mw;
     const bspPart = upstreamOn && up?.bsp?.headroom_after_queue_mw != null
-      ? `; BSP ${up.bsp.name}: ${mw(up.bsp.headroom_after_queue_mw)} MW left after its queue. The lower counts${p.limiting_level === "bsp" ? " (the BSP)" : " (this site)"}`
+      ? `; ${Level} ${up.bsp.name}: ${mw(up.bsp.headroom_after_queue_mw)} MW left after its queue. The lower counts${p.limiting_level === "bsp" ? ` (the ${level})` : " (this site)"}`
       : "";
     return {
       big: mw(value),
       color,
-      label: upstreamOn ? "MW of published headroom left after the queue, counting its BSP" : "MW of published headroom left after the queue",
+      label: upstreamOn ? `MW of published headroom left after the queue, counting its ${level}` : "MW of published headroom left after the queue",
       sub: e
         ? `Rank ${e.rank} of ${loadRanking.n} sites with ≥ ${loadMw} MW published headroom`
         : `Not on the shortlist: ${mw(p.demand_headroom_mw)} MW published headroom is below ${loadMw} MW`,
@@ -320,7 +332,7 @@ export default function App() {
       secondary: scoreText,
       sources: devSources,
     };
-  }, [selectedId, byId, ranking, ramp, investor, scoreRanking, stuckRanking, loadRanking, bspRanking, loadMw, upstreamOn, mode, detail, siteWord, countryInfo]);
+  }, [selectedId, byId, ranking, ramp, investor, scoreRanking, stuckRanking, loadRanking, bspRanking, loadMw, upstreamOn, mode, detail, siteWord, countryInfo, level, Level, levels]);
 
   // The selected site's upstream path, drawn on the map.
   const topology = useMemo<GeoJSON.FeatureCollection | null>(() => {
@@ -353,7 +365,7 @@ export default function App() {
       : mode === "stuck"
         ? { label: `Stuck demand rank (${stuckRanking.n} sites)`, left: `#${stuckRanking.n}`, right: "#1", grey: "No stuck demand" }
         : mode === "bsp"
-          ? { label: `BSP stuck demand rank (${bspRanking.n} BSPs)`, left: `#${bspRanking.n}`, right: "#1", grey: "BSP not stuck or not published" }
+          ? { label: `${Level} stuck demand rank (${bspRanking.n} ${levels})`, left: `#${bspRanking.n}`, right: "#1", grey: `${Level} not stuck or not published` }
           : { label: `Rank by MW left after queue (${loadRanking.n} sites)`, left: `#${loadRanking.n}`, right: "#1" };
 
   const listTitle =
@@ -364,7 +376,8 @@ export default function App() {
       : mode === "stuck"
         ? "Queued demand beyond published headroom, largest first. Sites with none are not ranked."
         : `Sites with at least ${loadMw} MW of published headroom, ranked by headroom left after the queue ahead${
-            upstreamOn ? ", counting the bulk supply point (BSP) above each site" : " (BSP limits ignored)"}.`;
+            upstreamOn ? (level === "BSP" ? ", counting the bulk supply point (BSP) above each site" : ", counting the transmission node above each busbar")
+              : ` (${level} limits ignored)`}.`;
 
   const togglePanel = (p: Panel) => setPanel((cur) => (cur === p ? "none" : p));
 
@@ -374,7 +387,7 @@ export default function App() {
         <div>
           <h1 className="text-sm font-semibold">Grid Intelligence</h1>
           <p className="text-[11px] text-stone-500">
-            {hasTopology
+            {countryInfo?.has_gsp !== false
               ? `${networkNames(countryDnos, "Distribution network")} primary substations`
               : `${countryInfo?.name ?? ""}: distribution busbars, every distributor (CNMC${countryInfo?.data_period ? `, ${monthLabel(countryInfo.data_period)}` : ""})`}
           </p>
@@ -406,16 +419,16 @@ export default function App() {
                 options={[
                   { key: "score", label: "Score" },
                   { key: "stuck", label: "Most stuck MW", title: "Queued demand beyond published headroom" },
-                  ...(hasTopology ? [{ key: "bsp", label: "BSPs", title: "Bulk supply points by stuck MW" }] : []),
+                  ...(hasTopology ? [{ key: "bsp", label: level === "BSP" ? "BSPs" : "Transmission", title: `${Level}s by stuck MW` }] : []),
                 ]}
               />
             )}
             {viewKey === "developer" && (
               <>
                 <LoadInput value={loadMw} onChange={setLoadMw} />
-                {hasTopology && <label className="flex items-center gap-1.5 text-xs text-stone-600" title="Use the lower of the site's and its bulk supply point's headroom after queue">
+                {hasTopology && <label className="flex items-center gap-1.5 text-xs text-stone-600" title={`Use the lower of the site's and its ${level}'s headroom after queue`}>
                   <input type="checkbox" checked={upstreamOn} onChange={(e) => setUpstreamOn(e.target.checked)} className="accent-stone-900" />
-                  Count BSP limits
+                  Count {level} limits
                 </label>}
               </>
             )}
@@ -468,7 +481,13 @@ export default function App() {
           flyTo={flyTo}
           onSelectGsp={(g) => {
             setSelectedId(null);
+            setSelectedNode(null);
             setSelectedGsp(g);
+          }}
+          onSelectNode={(id) => {
+            setSelectedId(null);
+            setSelectedGsp(null);
+            setSelectedNode(id);
           }}
           onSelect={setSelectedId}
           dnos={countryDnos}
@@ -483,10 +502,18 @@ export default function App() {
           <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36 print:hidden">
             <BspList
               bsps={bsps}
+              level={level}
               visibleSites={visible}
               selectedBspId={selectedBspId}
-              // Select the BSP's own board if it is a site, else its first site.
-              onSelect={(b) => setSelectedId(b.site_id ?? b.site_ids[0] ?? null)}
+              // Select the BSP's own board if it is a site; otherwise open the node's card.
+              onSelect={(b) => {
+                if (b.site_id) setSelectedId(b.site_id);
+                else {
+                  setSelectedId(null);
+                  setSelectedNode(b.bsp_id);
+                  if (b.lat != null && b.lon != null) setFlyTo({ center: [b.lon, b.lat], zoom: 9, key: Date.now() });
+                }
+              }}
               onClose={() => setPanel("none")}
             />
           </div>
@@ -500,7 +527,7 @@ export default function App() {
                 ...(mode === "score" && weights
                   ? [`Weights: ${Object.entries(weights).map(([k, w]) => `${k} ${w}`).join(", ")}`]
                   : []),
-                ...(mode === "developer" ? [`Load size ${loadMw} MW; BSP limits ${upstreamOn ? "counted" : "ignored"}`] : []),
+                ...(mode === "developer" ? [`Load size ${loadMw} MW; ${level} limits ${upstreamOn ? "counted" : "ignored"}`] : []),
                 `Filters: areas ${filters.licenceAreas.join("/") || "all"}; voltages ${filters.voltages.join("/") || "all"}`,
                 `Sources: ${[...new Map((meta?.sources ?? []).map((s) => [s.dataset_id, `${s.dataset_id} (${s.publish_date}, ${s.licence})`])).values()].join("; ")}`,
                 meta?.disclaimer ?? "Published headroom is indicative and not guaranteed.",
@@ -575,6 +602,27 @@ export default function App() {
             <GspCard gsp={gspRows.find((g) => g.gsp === selectedGsp)!} onClose={() => setSelectedGsp(null)} />
           </div>
         )}
+        {!selectedId && !selectedGsp && selectedNode && bsps.find((b) => b.bsp_id === selectedNode) && (() => {
+          const node = bsps.find((b) => b.bsp_id === selectedNode)!;
+          const src = [node.headroom_source ? { ...(bspSources[node.dno] ?? { url: "", publish_date: "" }), dataset_id: node.headroom_source } : null,
+            ...(meta?.sources ?? []).filter((s) => s.dno === node.dno && (s.field === "queue_mw" || s.field === "topology"))]
+            .filter((x): x is Source => x != null && !!x.url);
+          return (
+            <div className="absolute inset-x-0 bottom-0 z-10 h-[58%] sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:h-auto sm:w-auto print:static print:h-auto">
+              <NodeCard
+                node={node}
+                level={level}
+                sites={props.filter((p) => p.bsp_id === node.bsp_id)}
+                sources={[...new Map(src.map((s) => [s.dataset_id, s])).values()]}
+                onSelect={(id) => {
+                  setSelectedNode(null);
+                  setSelectedId(id);
+                }}
+                onClose={() => setSelectedNode(null)}
+              />
+            </div>
+          );
+        })()}
         {selectedId && (
           <div className="absolute inset-x-0 bottom-0 z-10 h-[58%] sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:h-auto sm:w-auto print:static print:h-auto">
             <SidePanel

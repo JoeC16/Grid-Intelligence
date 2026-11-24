@@ -25,6 +25,8 @@ interface Props {
   /** Fly the camera here; change `key` to fly again to the same place. */
   flyTo?: { center: [number, number]; zoom: number; key: number } | null;
   onSelectGsp?: (gsp: string) => void;
+  /** An upper-level node with no site of its own (Spain's transmission nodes). */
+  onSelectNode?: (bspId: string) => void;
   onSelect: (siteId: string | null) => void;
   /** Networks covered, for the map's data attribution. */
   dnos?: DnoInfo[];
@@ -51,7 +53,7 @@ const unlessHidden = (on: number): maplibregl.ExpressionSpecification =>
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
 export default function MapView({
-  sites, display, visible, selectedId, highlightIds = [], topology = null, network = null, flyTo = null, onSelectGsp, onSelect,
+  sites, display, visible, selectedId, highlightIds = [], topology = null, network = null, flyTo = null, onSelectGsp, onSelectNode, onSelect,
   dnos = [],
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
@@ -59,8 +61,8 @@ export default function MapView({
   const [ready, setReady] = useState(false);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   // Latest props for the map's event handlers, which are bound once.
-  const latest = useRef({ display, visible, onSelect, onSelectGsp });
-  latest.current = { display, visible, onSelect, onSelectGsp };
+  const latest = useRef({ display, visible, onSelect, onSelectGsp, onSelectNode });
+  latest.current = { display, visible, onSelect, onSelectGsp, onSelectNode };
 
   // Data attribution, added once the networks covered are known (from /meta).
   const attribution = attributionHtml(dnos);
@@ -186,8 +188,8 @@ export default function MapView({
         m.on("mousemove", layer, (e) => {
           const f = e.features?.[0];
           if (!f) return;
-          const p = f.properties as { kind: string; name: string; stuck_mw: number; queue_mw: number; site_count: number };
-          const what = p.kind === "node_gsp" ? "Grid supply point" : "Bulk supply point";
+          const p = f.properties as { kind: string; id: string; name: string; stuck_mw: number; queue_mw: number; site_count: number };
+          const what = p.kind === "node_gsp" ? "Grid supply point" : String(p.id).startsWith("TX") ? "Transmission node" : "Bulk supply point";
           nodeTip
             .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
             .setHTML(`<strong>${escapeHtml(p.name)}</strong><br/><span style="color:#5f5e5a">${what} · ${Number(p.stuck_mw).toFixed(1)} MW stuck · ${Number(p.queue_mw).toFixed(1)} MW queued · ${p.site_count} sites</span>`)
@@ -267,9 +269,13 @@ export default function MapView({
           latest.current.onSelectGsp?.(String(gsp.properties!.name));
           return;
         }
-        const bsp = nodes.find((f) => f.properties?.kind === "node_bsp" && f.properties?.site_id);
-        if (bsp) {
-          latest.current.onSelect(String(bsp.properties!.site_id));
+        const bsp = nodes.find((f) => f.properties?.kind === "node_bsp");
+        if (bsp?.properties?.site_id) {
+          latest.current.onSelect(String(bsp.properties.site_id));
+          return;
+        }
+        if (bsp && latest.current.onSelectNode) {
+          latest.current.onSelectNode(String(bsp.properties!.id));
           return;
         }
         // Generous hit target: anything within 8px of the click.

@@ -61,6 +61,8 @@ export interface CountryInfo {
   map_center: [number, number];
   map_zoom: number;
   has_topology: boolean;
+  has_gsp: boolean;
+  upper_level: string; // "BSP" or "transmission node"
   data_period: string | null; // e.g. "2026-10" (Spain: the CNMC month)
 }
 
@@ -186,6 +188,7 @@ export interface SiteDetail {
       bsp_id: string; name: string; lat: number | null; lon: number | null; site_id: string | null;
       matched: boolean; note: string | null; site_count: number; headroom_mw: number | null; queue_mw: number;
       headroom_after_queue_mw: number | null; stuck_mw: number | null; is_this_site: boolean; sources: Source[];
+      level?: "bsp" | "transmission"; cep_mw?: number | null; free_bays?: number | null;
     } | null;
     gsp: {
       name: string; lat: number | null; lon: number | null; import_capacity_utilisation_pct: number | null;
@@ -295,9 +298,15 @@ export interface BspRow {
   stuck_mw: number | null;
   stuck_rank: number | null;
   site_ids: string[];
+  headroom_source?: string | null;
+  cep_mw?: number | null; // Spain: transmission capacity for power-electronics demand (CEP, CAD1)
+  free_bays?: number | null;
 }
 
 export const fetchBsps = () => staticOrApi<{ count: number; bsps: BspRow[]; sources: Record<string, Source | null> }>("bsps", "/bsps");
+
+/** Upper level of the network tree in each country: "BSP" (GB) or "transmission node" (Spain). */
+export const upperLevel = (c: CountryInfo | null | undefined) => c?.upper_level ?? "BSP";
 
 export interface StoryChapter {
   id: string;
@@ -349,7 +358,8 @@ export interface OperatorRow {
 export const fetchOperators = (country: string) =>
   staticOrApi<{ country: string; count: number; operators: OperatorRow[]; sources: Record<string, Source | null>; note: string }>(
     `operators-${country}`, `/operators?country=${country}`);
-export const fetchNetwork = () => staticOrApi<GeoJSON.FeatureCollection>("network", "/network");
+export const fetchNetwork = (country: string) =>
+  staticOrApi<GeoJSON.FeatureCollection>(`network-${country}`, `/network?country=${country}`);
 
 export interface GspRow {
   gsp: string;

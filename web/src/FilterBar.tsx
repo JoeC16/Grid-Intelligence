@@ -135,7 +135,7 @@ export default function FilterBar({ meta, country, dnos, filters, onChange, show
       )}
 
       <span className="text-xs text-stone-500 tabular-nums">
-        {shown?.toLocaleString("en-GB") ?? "…"} of {(country?.site_count ?? meta.site_count).toLocaleString("en-GB")} {country && !country.has_topology ? "busbars" : "substations"}
+        {shown?.toLocaleString("en-GB") ?? "…"} of {(country?.site_count ?? meta.site_count).toLocaleString("en-GB")} {country && country.has_gsp === false ? "busbars" : "substations"}
       </span>
     </div>
   );

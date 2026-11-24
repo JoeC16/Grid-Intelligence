@@ -166,3 +166,17 @@ def test_spain_story_numbers_trace_to_data():
     assert ops["count"] == es["operator"].nunique()
     assert ch["es_operators"]["facts"][0]["label"] == ops["operators"][0]["operator_name"]
     assert all(s["dataset_id"].startswith("cnmc-") for c in st["chapters"] for s in c["sources"])
+
+
+@needs_db
+def test_spain_upstream_chapter_traces_to_tree():
+    d = _load()
+    if "ES" not in set(d["sites"]["country"]):
+        pytest.skip("no Spain data")
+    ch = {c["id"]: c for c in TestClient(app).get("/story?country=ES").json()["chapters"]}
+    facts = {f["label"]: f["value"] for f in ch["es_upstream"]["facts"]}
+    es = d["sites"][(d["sites"]["country"] == "ES") & d["sites"]["scorable"]]
+    tx = d["bsps"][(d["bsps"]["country"] == "ES") & d["bsps"]["matched"].astype(bool)]
+    assert facts["Busbars limited by their transmission node"] == int((es["limiting_level"] == "bsp").sum())
+    assert facts["Transmission nodes at zero capacity"] == int((tx["headroom_mw"] <= 0).sum())
+    assert ch["es_upstream"]["focus"]["network"] is True

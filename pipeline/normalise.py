@@ -22,6 +22,7 @@ from .adapters.base import (
     GSP_QUEUE_COLUMNS,
     HEADROOM_COLUMNS,
     LARGE_DEMAND_COLUMNS,
+    OPTIONAL_BSP_COLUMNS,
     OPTIONAL_HEADROOM_COLUMNS,
     OPTIONAL_SITE_COLUMNS,
     QUEUE_COLUMNS,
@@ -176,7 +177,8 @@ def build_all(adapter: DNOAdapter) -> dict[str, pd.DataFrame]:
     sites = build_sites(adapter)
     gsp_list = adapter.fetch_gsps()
     bsps, links = adapter.fetch_topology()
-    net = graph.build(sites, _check(bsps, BSP_COLUMNS, "fetch_topology bsps"),
+    extra = [c for c in OPTIONAL_BSP_COLUMNS if c in bsps]
+    net = graph.build(sites, _check(bsps, BSP_COLUMNS + extra, "fetch_topology bsps"),
                       _check(links, BSP_LINK_COLUMNS, "fetch_topology links"), gsp_list)
     sites = net["sites"]
     large_demand = build_large_demand(adapter)

@@ -81,3 +81,29 @@ def test_bsp_own_board_points_to_gsp_not_itself():
     s = out["sites"].set_index("site_id")
     # X's own queue counts at the BSP: 30 - (4 + 2) = 24 effective for X
     assert s.loc["X", "effective_headroom_mw"] == 24.0 and s.loc["X", "limiting_level"] == "bsp"
+
+
+def test_spain_node_names_normalise_and_split():
+    from pipeline.adapters.cnmc_es import node_key, split_nodes
+    assert node_key("LA PLANA (CAST) 220") == "LA PLANA 220"
+    assert node_key("Siero 220 kV") == "SIERO 220"
+    assert node_key("Can Jardí 220") == "CAN JARDI 220"
+    assert split_nodes("FARGUE 220 CAPARACENA 220") == ["FARGUE 220", "CAPARACENA 220"]
+    assert split_nodes("CH JOSE MARIA ORIOL 220") == ["CH JOSE MARIA ORIOL 220"]
+
+
+def test_upper_level_limits_busbars_like_a_bsp():
+    """Spain's transmission node plays the BSP's role: effective = min(local, node after the queue under it)."""
+    sites = pd.DataFrame({"site_id": ["a", "b", "c"], "gsp": None, "demand_headroom_mw": [10.0, 4.0, 6.0],
+                          "queue_mw": [2.0, 1.0, 0.0]})
+    bsps = pd.DataFrame({"bsp_id": ["TX:N 220"], "name": ["N 220 kV"], "licence_area": ["Red Eléctrica"], "lat": [40.0],
+                         "lon": [-3.0], "site_id": [None], "gsp": [None], "headroom_mw": [5.0],
+                         "headroom_source": ["cnmc-demanda-en-transporte"], "matched": [True], "note": [""], "cep_mw": [3.0]})
+    links = pd.DataFrame({"site_id": ["a", "b"], "bsp_id": ["TX:N 220", "TX:N 220"]})
+    gsps = pd.DataFrame(columns=["gsp", "import_capacity_utilisation_pct"])
+    net = graph.build(sites, bsps, links, gsps)
+    s = net["sites"].set_index("site_id")
+    assert s.at["a", "effective_headroom_mw"] == 2.0 and s.at["a", "limiting_level"] == "bsp"  # node: 5 − 3 queued
+    assert s.at["c", "effective_headroom_mw"] == 6.0 and s.at["c", "limiting_level"] == "primary"  # no node
+    assert net["bsps"].iloc[0]["cep_mw"] == 3.0
+    assert set(net["edges"]["parent_id"]) == {"TX:N 220"}

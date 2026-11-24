@@ -2,6 +2,7 @@ import type { BspRow } from "./api";
 
 interface Props {
   bsps: BspRow[];
+  level?: string; // "BSP" or "transmission node"
   visibleSites: Set<string>;
   selectedBspId: string | null;
   onSelect: (b: BspRow) => void;
@@ -10,7 +11,8 @@ interface Props {
 
 const mw = (v: number | null) => (v == null ? "—" : v.toLocaleString("en-GB", { maximumFractionDigits: 1, minimumFractionDigits: 1 }));
 
-export default function BspList({ bsps, visibleSites, selectedBspId, onSelect, onClose }: Props) {
+export default function BspList({ bsps, level = "BSP", visibleSites, selectedBspId, onSelect, onClose }: Props) {
+  const es = level !== "BSP";
   // Ranked BSPs only; area/voltage filters hide BSPs with no visible site.
   const rows = bsps
     .filter((b) => b.stuck_rank != null && b.site_ids.some((id) => visibleSites.has(id)))
@@ -19,9 +21,9 @@ export default function BspList({ bsps, visibleSites, selectedBspId, onSelect, o
     <div className="pointer-events-auto flex max-h-full w-80 flex-col rounded-md bg-white shadow-lg">
       <div className="flex items-start justify-between border-b border-stone-200 px-4 py-3">
         <div>
-          <p className="text-sm font-semibold text-stone-900">BSPs by stuck MW</p>
+          <p className="text-sm font-semibold text-stone-900">{es ? "Transmission nodes" : "BSPs"} by stuck MW</p>
           <p className="mt-0.5 text-[11px] leading-snug text-stone-500">
-            Demand queued under each bulk supply point beyond its published headroom, largest first.
+            Demand queued under each {es ? "Red Eléctrica transmission node" : "bulk supply point"} beyond its published headroom, largest first.
           </p>
         </div>
         <button type="button" onClick={onClose} aria-label="Close ranking" className="ml-2 rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700">
@@ -40,14 +42,16 @@ export default function BspList({ bsps, visibleSites, selectedBspId, onSelect, o
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-xs font-medium text-stone-900">{b.name}</span>
                 <span className="block text-[11px] text-stone-500">
-                  {b.licence_area} · {b.site_count} sites · {mw(b.stuck_mw)} MW stuck ({mw(b.queue_mw)} queued, {mw(b.headroom_mw)} headroom)
+                  {es ? "" : `${b.licence_area} · `}{b.site_count} {es ? "busbars" : "sites"} · {mw(b.stuck_mw)} MW stuck ({mw(b.queue_mw)} queued, {mw(b.headroom_mw)} headroom)
                 </span>
               </span>
             </button>
           </li>
         ))}
       </ol>
-      <div className="border-t border-stone-200 px-4 py-2 text-[11px] text-stone-500">{rows.length} BSPs with stuck demand</div>
+      <div className="border-t border-stone-200 px-4 py-2 text-[11px] text-stone-500">
+        {rows.length} {es ? "transmission nodes" : "BSPs"} with stuck demand
+      </div>
     </div>
   );
 }
