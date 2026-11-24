@@ -1,0 +1,111 @@
+# Weekly data refresh and deploy (docs/OPERATIONS.md).
+#
+#  1. restore earlier bronze snapshots (GitHub release assets, never git)
+#  2. take a new snapshot from the UKPN Open Data Portal, build, score
+#  3. data quality checks: a failure stops here, nothing is deployed
+#  4. store the snapshot as a release asset if any dataset changed
+#  5. full test suite, web build, deploy to Vercel production
+#
+# Secrets: UKPN_API_KEY, VERCEL_TOKEN. Variables: VERCEL_ORG_ID, VERCEL_PROJECT_ID.
+name: Refresh data and deploy
+
+on:
+  schedule:
+    - cron: "17 5 * * 1" # Mondays 05:17 UTC
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy to Vercel after the refresh"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # create snapshot releases
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check configuration
+        env:
+          UKPN_API_KEY: ${{ secrets.UKPN_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: |
+          missing=""
+          [ -n "$UKPN_API_KEY" ] || missing="$missing UKPN_API_KEY(secret)"
+          [ -n "$VERCEL_TOKEN" ] || missing="$missing VERCEL_TOKEN(secret)"
+          [ -n "$VERCEL_ORG_ID" ] || missing="$missing VERCEL_ORG_ID(variable)"
+          [ -n "$VERCEL_PROJECT_ID" ] || missing="$missing VERCEL_PROJECT_ID(variable)"
+          if [ -n "$missing" ]; then
+            echo "::error::Not configured:$missing. See docs/OPERATIONS.md, 'One-time setup'."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.32"
+      - name: Install Python dependencies
+        run: uv sync --frozen
+
+      - name: Restore earlier snapshots
+        run: |
+          mkdir -p data/bronze/ukpn
+          for tag in $(gh release list --limit 200 --json tagName --jq '.[].tagName | select(startswith("snapshot-ukpn-"))'); do
+            day="${tag#snapshot-ukpn-}"
+            gh release download "$tag" --pattern "bronze-ukpn-${day}.tar.gz" --dir /tmp/bronze
+            tar -xzf "/tmp/bronze/bronze-ukpn-${day}.tar.gz" -C data/bronze/ukpn
+          done
+          ls data/bronze/ukpn || true
+
+      - name: Take a new snapshot, build and check
+        env:
+          UKPN_API_KEY: ${{ secrets.UKPN_API_KEY }}
+        run: uv run python -m pipeline.run --refresh
+
+      - name: Store the snapshot if anything changed
+        run: |
+          day=$(ls data/bronze/ukpn | sort | tail -1)
+          prev=$(ls data/bronze/ukpn | sort | tail -2 | head -1)
+          changed=$(uv run python -m pipeline.snapshot_diff "data/bronze/ukpn/$prev" "data/bronze/ukpn/$day")
+          echo "latest=$day previous=$prev changed=$changed"
+          if [ "$changed" = "true" ] || [ "$prev" = "$day" ]; then
+            tar -czf "bronze-ukpn-${day}.tar.gz" -C data/bronze/ukpn "$day"
+            gh release create "snapshot-ukpn-${day}" "bronze-ukpn-${day}.tar.gz" \
+              --title "UKPN data snapshot ${day}" \
+              --notes "Raw UKPN Open Data Portal downloads (CC BY 4.0), bronze layer. See docs/DATA_MODEL.md." \
+              || gh release upload "snapshot-ukpn-${day}" "bronze-ukpn-${day}.tar.gz" --clobber
+          else
+            echo "No dataset republished since ${prev}: snapshot not stored."
+          fi
+
+      - name: Full test suite
+        run: uv run pytest -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Web build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to Vercel
+        if: ${{ github.event_name == 'schedule' || inputs.deploy }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VERCEL_TELEMETRY_DISABLED: "1"
+        run: npx --yes vercel@66.6.0 deploy --prod --yes --token "$VERCEL_TOKEN"
