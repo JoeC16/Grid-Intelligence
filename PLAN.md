@@ -125,13 +125,13 @@ Tasks:
 ## Phase 11 — Production-ready for a pilot
 Make it safe and repeatable to put in front of paying users: nothing open to abuse, data that refreshes and checks itself, a deploy that doesn't depend on one session, and the basics customers expect.
 
-- [ ] Ask box protection: off unless an access code is configured (ASK_ACCESS_CODE); code required on every question; per-visitor rate limit; usage logged. Anthropic spend cap set in the Console (owner action).
-- [ ] Data quality checks (pipeline/checks.py) run on every build: row counts vs the previous snapshot, join and match rates, score ranges, provenance on every field. A failed check stops the deploy.
-- [ ] Scheduled refresh + deploy (GitHub Actions): weekly and on demand: restore bronze snapshots, take a new one, build, check, store the snapshot durably (GitHub release asset, not git), deploy to Vercel. CI on pull requests: tests + web build.
-- [ ] Terms and disclaimer page ("not a connection offer", no warranty, data licences). Wording to be reviewed by a lawyer before charging.
-- [ ] Exports: ranking as CSV (with the weights used and sources); printable site report (save as PDF).
-- [ ] Health endpoint (snapshot date, counts) for uptime monitoring; structured logs for AI questions (tool calls, tokens).
-- [ ] Phone layout: side panel as a bottom sheet so the map stays visible.
+- [x] Ask box protection: off unless an access code is configured (ASK_ACCESS_CODE); code required on every question; per-visitor rate limit; usage logged. Anthropic spend cap set in the Console (owner action).
+- [x] Data quality checks (pipeline/checks.py) run on every build: row counts vs the previous snapshot, join and match rates, score ranges, provenance on every field. A failed check stops the deploy.
+- [x] Scheduled refresh + deploy (GitHub Actions): weekly and on demand: restore bronze snapshots, take a new one, build, check, store the snapshot durably (GitHub release asset, not git), deploy to Vercel. CI on pull requests: tests + web build.
+- [x] Terms and disclaimer page ("not a connection offer", no warranty, data licences). Wording to be reviewed by a lawyer before charging.
+- [x] Exports: ranking as CSV (with the weights used and sources); printable site report (save as PDF).
+- [x] Health endpoint (snapshot date, counts) for uptime monitoring; structured logs for AI questions (tool calls, tokens).
+- [x] Phone layout: side panel as a bottom sheet so the map stays visible.
 - [ ] Merge to main and deploy from main.
-- [ ] docs/OPERATIONS.md: secrets, the refresh workflow, how to deploy, roll back, and what to do when a check fails.
+- [x] docs/OPERATIONS.md: secrets, the refresh workflow, how to deploy, roll back, and what to do when a check fails.
 - Done when: the Ask box can't be used without a code, a refresh can run end to end without this session, checks gate the deploy, and the code is on main.

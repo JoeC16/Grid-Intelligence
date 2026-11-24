@@ -519,3 +519,18 @@ def _jsonable(v):
     if isinstance(v, (list, tuple)):
         return [_jsonable(x) for x in v]
     return _clean(v)
+
+
+@app.get("/health")
+def health() -> dict:
+    """For uptime monitors: is the data loaded, and how fresh is it. No secrets."""
+    data = _load()
+    snaps = data["snapshots"]
+    return {
+        "status": "ok",
+        "latest_snapshot": snaps[-1] if snaps else None,
+        "snapshots": len(snaps),
+        "sites": int(len(data["sites"])),
+        "scored": int(data["sites"]["score"].notna().sum()),
+        "ask_enabled": bool(os.getenv("ASK_ACCESS_CODE")) and bool(assistant.anthropic_key()),
+    }

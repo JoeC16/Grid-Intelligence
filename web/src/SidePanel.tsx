@@ -178,7 +178,7 @@ function UpstreamSection({ site, onSelect }: { site: SiteDetail; onSelect: (id: 
 
 export default function SidePanel({ site, headline, weights, colocated, onSelect, loading, error, onClose }: Props) {
   return (
-    <aside className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:w-[380px]">
+    <aside className="flex h-full w-full flex-col overflow-hidden rounded-t-xl bg-white shadow-xl sm:w-[380px] sm:rounded-none print:h-auto print:w-full print:overflow-visible print:rounded-none print:shadow-none">
       <div className="flex items-start justify-between border-b border-stone-200 px-5 py-4">
         <div className="min-w-0">
           {site ? (
@@ -195,17 +195,30 @@ export default function SidePanel({ site, headline, weights, colocated, onSelect
             <h2 className="text-base font-semibold text-stone-900">{loading ? "Loading…" : "Substation"}</h2>
           )}
         </div>
+        {site && (
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="ml-3 shrink-0 rounded border border-stone-300 px-2 py-1 text-[11px] font-medium text-stone-700 hover:border-stone-500 print:hidden"
+            title="Print this site's report, or save it as a PDF"
+          >
+            Print report
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}
           aria-label="Close panel"
-          className="ml-3 rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+          className="ml-3 rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700 print:hidden"
         >
           ✕
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-6">
+      <div className="flex-1 overflow-y-auto px-5 pb-6 print:overflow-visible">
+        <p className="hidden pt-3 text-[11px] text-stone-500 print:block">
+          Grid Intelligence site report · printed {new Date().toISOString().slice(0, 10)} · UKPN Open Data (CC BY 4.0) · not a connection offer
+        </p>
         {error && <p className="mt-4 text-sm text-red-700">{error}</p>}
         {site && (
           <>

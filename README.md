@@ -21,7 +21,7 @@ uv run uvicorn backend.main:app --port 8000     # API: /meta, /sites, /sites/{id
 cd web && npm install && npm run dev        # http://localhost:5173
 ```
 
-AI ask box (`POST /query`): needs a Claude API key in the environment as `ANTHROPIC_API_KEY`, or as `GRID_ANTHROPIC_API_KEY` in the Claude Code cloud environment (which doesn't pass `ANTHROPIC_*` variables through to sessions) (a local `.env` works as a fallback; never commit it). Claude (`claude-opus-5-5`) answers with tools: `search_sites`, `get_site`, `locate_place`, and the network-graph tools `get_upstream`, `get_siblings` and `search_bsps`. It may state only numbers its tools returned; any number in an answer that can't be matched to a tool result is listed in `unverified_numbers` and shown as a warning. Check it end to end with `uv run python -m scripts.ask_check` (8 questions, 3 of them about the network graph; real billed API calls).
+AI ask box (`POST /query`): off unless `ASK_ACCESS_CODE` is set (every question must carry the code); also needs a Claude API key in the environment as `ANTHROPIC_API_KEY`, or as `GRID_ANTHROPIC_API_KEY` in the Claude Code cloud environment (which doesn't pass `ANTHROPIC_*` variables through to sessions) (a local `.env` works as a fallback; never commit it). Claude (`claude-opus-5-5`) answers with tools: `search_sites`, `get_site`, `locate_place`, and the network-graph tools `get_upstream`, `get_siblings` and `search_bsps`. It may state only numbers its tools returned; any number in an answer that can't be matched to a tool result is listed in `unverified_numbers` and shown as a warning. Check it end to end with `uv run python -m scripts.ask_check` (8 questions, 3 of them about the network graph; real billed API calls).
 
 `data/grid.duckdb` tables: `sites` (one row per primary substation), `gsps` (primaries rolled up to GSP, plus grid-level queue and large demand), `headroom_scenarios` (DFES headroom, all scenarios and years), `large_demand`, `field_sources` (dataset ID + publish date for every field), `site_scores` (0–100 stuck-demand score, rank and per-signal percentiles), `score_weights`.
 
@@ -32,7 +32,7 @@ Scoring ([docs/SCORING.md](docs/SCORING.md), config in `config/weights.yaml`):
 
 The web app repeats the investor maths in the browser (`web/src/scoring.ts`, kept in step with `pipeline/score.py`) so weight sliders, the stuck-MW sort and the developer load size re-rank live.
 
-Data layers (bronze snapshots → silver → gold marts) and how a number reaches the screen: [docs/DATA_MODEL.md](docs/DATA_MODEL.md). See [docs/PROFILE.md](docs/PROFILE.md) for every dataset's columns, quirks, and how the joins work.
+Operations (secrets, weekly refresh, checks, deploy, rollback, Ask box protection): [docs/OPERATIONS.md](docs/OPERATIONS.md). Data layers (bronze snapshots → silver → gold marts) and how a number reaches the screen: [docs/DATA_MODEL.md](docs/DATA_MODEL.md). See [docs/PROFILE.md](docs/PROFILE.md) for every dataset's columns, quirks, and how the joins work.
 
 ## Deploy (Vercel)
 

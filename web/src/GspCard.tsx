@@ -16,7 +16,7 @@ function Row({ label, value, unit }: { label: string; value: string; unit?: stri
 
 export default function GspCard({ gsp, onClose }: { gsp: GspRow; onClose: () => void }) {
   return (
-    <aside className="flex h-full w-full flex-col overflow-hidden bg-white shadow-xl sm:w-[380px]">
+    <aside className="flex h-full w-full flex-col overflow-hidden rounded-t-xl bg-white shadow-xl sm:w-[380px] sm:rounded-none">
       <div className="flex items-start justify-between border-b border-stone-200 px-5 py-4">
         <div>
           <h2 className="text-base font-semibold text-stone-900">{gsp.gsp}</h2>

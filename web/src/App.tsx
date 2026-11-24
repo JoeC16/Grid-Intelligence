@@ -318,8 +318,8 @@ export default function App() {
   const togglePanel = (p: Panel) => setPanel((cur) => (cur === p ? "none" : p));
 
   return (
-    <div className="flex h-full flex-col bg-stone-50 text-stone-900">
-      <header className="z-20 flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-stone-200 bg-white px-4 py-2.5">
+    <div className="flex h-full flex-col bg-stone-50 text-stone-900 print:block print:h-auto print:bg-white">
+      <header className="z-20 flex print:hidden flex-wrap items-center gap-x-6 gap-y-2 border-b border-stone-200 bg-white px-4 py-2.5">
         <div>
           <h1 className="text-sm font-semibold">Grid Intelligence</h1>
           <p className="text-[11px] text-stone-500">UK Power Networks primary substations</p>
@@ -385,7 +385,8 @@ export default function App() {
         </div>
       </header>
 
-      <main className="relative flex-1 overflow-hidden">
+      <main className="relative flex-1 overflow-hidden print:overflow-visible">
+        <div className="contents print:hidden">
         <MapView
           sites={allSites}
           display={display}
@@ -401,13 +402,14 @@ export default function App() {
           }}
           onSelect={setSelectedId}
         />
+        </div>
 
-        <div className="pointer-events-none absolute bottom-8 left-3 hidden sm:block">
+        <div className="pointer-events-none absolute bottom-8 left-3 hidden sm:block print:hidden">
           <Legend ramp={ramp} {...legend} />
         </div>
 
         {panel === "ranking" && mode === "bsp" && visible && (
-          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36">
+          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36 print:hidden">
             <BspList
               bsps={bsps}
               visibleSites={visible}
@@ -419,8 +421,20 @@ export default function App() {
           </div>
         )}
         {panel === "ranking" && mode !== "bsp" && ranking && visible && (
-          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36">
+          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36 print:hidden">
             <RankList
+              exportContext={[
+                `Grid Intelligence export, ${new Date().toISOString().slice(0, 10)}`,
+                `${listTitle}: ${listSubtitle}`,
+                ...(mode === "score" && weights
+                  ? [`Weights: ${Object.entries(weights).map(([k, w]) => `${k} ${w}`).join(", ")}`]
+                  : []),
+                ...(mode === "developer" ? [`Load size ${loadMw} MW; BSP limits ${upstreamOn ? "counted" : "ignored"}`] : []),
+                `Filters: areas ${filters.licenceAreas.join("/") || "all"}; voltages ${filters.voltages.join("/") || "all"}`,
+                `Sources: ${[...new Map((meta?.sources ?? []).map((s) => [s.dataset_id, `${s.dataset_id} (${s.publish_date}, ${s.licence})`])).values()].join("; ")}`,
+                meta?.disclaimer ?? "Published headroom is indicative and not guaranteed.",
+                "Not a connection offer. Ranks are UKPN-wide; filters only hide rows.",
+              ]}
               key={mode}
               title={listTitle}
               subtitle={listSubtitle}
@@ -434,12 +448,12 @@ export default function App() {
           </div>
         )}
         {panel === "story" && (
-          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36">
+          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36 print:hidden">
             <StoryPanel chapters={story} index={storyIndex} onIndex={setStoryIndex} error={storyError} onClose={() => setPanel("none")} />
           </div>
         )}
         {panel === "ask" && (
-          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36">
+          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36 print:hidden">
             <AskPanel
               result={askResult}
               onResult={setAskResult}
@@ -450,7 +464,7 @@ export default function App() {
           </div>
         )}
         {panel === "weights" && mode === "score" && investor && weights && meta && (
-          <div className="pointer-events-none absolute left-3 top-3 z-10">
+          <div className="pointer-events-none absolute left-3 top-3 z-10 print:hidden">
             <WeightsPanel view={investor} signals={meta.signals} weights={weights} onChange={setWeights} onClose={() => setPanel("none")} />
           </div>
         )}
@@ -461,12 +475,12 @@ export default function App() {
           </div>
         )}
         {!selectedId && selectedGsp && gspRows.find((g) => g.gsp === selectedGsp) && (
-          <div className="absolute inset-y-0 right-0 z-10 w-full sm:w-auto">
+          <div className="absolute inset-x-0 bottom-0 z-10 h-[58%] sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:h-auto sm:w-auto print:static print:h-auto">
             <GspCard gsp={gspRows.find((g) => g.gsp === selectedGsp)!} onClose={() => setSelectedGsp(null)} />
           </div>
         )}
         {selectedId && (
-          <div className="absolute inset-y-0 right-0 z-10 w-full sm:w-auto">
+          <div className="absolute inset-x-0 bottom-0 z-10 h-[58%] sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:h-auto sm:w-auto print:static print:h-auto">
             <SidePanel
               site={detail}
               headline={headline}

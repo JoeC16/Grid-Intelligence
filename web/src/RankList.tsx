@@ -3,6 +3,8 @@ import type { SiteProps } from "./api";
 import { describe, type Ranking } from "./ranking";
 
 interface Props {
+  /** Lines describing the view, weights and sources, written at the top of the CSV. */
+  exportContext: string[];
   title: string;
   subtitle: string;
   ranking: Ranking;
@@ -15,7 +17,22 @@ interface Props {
 
 const PAGE = 25;
 
-export default function RankList({ title, subtitle, ranking, sites, visible, selectedId, onSelect, onClose }: Props) {
+const csvCell = (v: unknown) => {
+  const s = v == null ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+function downloadCsv(filename: string, lines: string[]) {
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function RankList({ exportContext, title, subtitle, ranking, sites, visible, selectedId, onSelect, onClose }: Props) {
   const [shown, setShown] = useState(PAGE);
   // Ranks are UKPN-wide; area/voltage filters only hide rows.
   const rows = [...ranking.entries]
@@ -61,7 +78,24 @@ export default function RankList({ title, subtitle, ranking, sites, visible, sel
       )}
       <div className="flex items-center justify-between border-t border-stone-200 px-4 py-2 text-[11px] text-stone-500">
         <span>
-          {Math.min(shown, rows.length)} of {rows.length} shown
+          {Math.min(shown, rows.length)} of {rows.length} shown ·{" "}
+          <button
+            type="button"
+            className="font-medium text-stone-700 hover:underline"
+            onClick={() => {
+              const header = ["rank", "site_id", "name", "licence_area", "voltage_kv", "gsp", "ranked_on", "value",
+                "published_headroom_mw", "queue_mw", "effective_headroom_mw", "stuck_mw", "stuck_demand_score_default_weights"];
+              const body = rows.map(([id, e]) => {
+                const s = sites.get(id);
+                return [e.rank, id, s?.name, s?.licence_area, s?.voltage, s?.gsp, ranking.mode, e.value,
+                  s?.demand_headroom_mw, s?.queue_mw, s?.effective_headroom_mw, s?.stuck_mw, s?.score].map(csvCell).join(",");
+              });
+              downloadCsv(`grid-intelligence-${ranking.mode}-${new Date().toISOString().slice(0, 10)}.csv`,
+                [...exportContext.map((l) => csvCell(`# ${l}`)), "", header.join(","), ...body]);
+            }}
+          >
+            Download CSV
+          </button>
         </span>
         {shown < rows.length && (
           <button type="button" onClick={() => setShown((n) => n + PAGE)} className="font-medium text-stone-700 hover:underline">

@@ -1,0 +1,34 @@
+# Tests and web build on every pull request and every push to main.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.32"
+      - name: Install Python dependencies
+        run: uv sync --frozen
+      # Tests that need data/grid.duckdb skip themselves; the scheduled refresh runs the full suite.
+      - name: Tests
+        run: uv run pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Web build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build

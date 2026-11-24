@@ -321,7 +321,10 @@ export default function MapView({
       const w = b.getEast() - b.getWest(), h = b.getNorth() - b.getSouth();
       const inside = c[0] > b.getWest() + w * pad && c[0] < b.getEast() - w * (pad + 0.25) &&
                      c[1] > b.getSouth() + h * pad && c[1] < b.getNorth() - h * pad;
-      if (!inside) m.easeTo({ center: c, zoom: Math.max(m.getZoom(), 10), duration: 600 });
+      // Phones: the panel is a bottom sheet over ~58% of the map, so centre the site in the strip above it.
+      const phone = window.innerWidth < 640;
+      if (phone) m.easeTo({ center: c, zoom: Math.max(m.getZoom(), 10), duration: 600, padding: { top: 0, left: 0, right: 0, bottom: m.getContainer().clientHeight * 0.58 } });
+      else if (!inside) m.easeTo({ center: c, zoom: Math.max(m.getZoom(), 10), duration: 600 });
     }
   }, [ready, selectedId, sites]);
 

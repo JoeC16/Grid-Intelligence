@@ -58,3 +58,9 @@ def test_sites_carry_percentiles_and_both_scores():
 
 def test_unknown_site_404():
     assert client.get("/sites/NOPE").status_code == 404
+
+
+def test_health():
+    h = client.get("/health").json()
+    assert h["status"] == "ok" and h["sites"] > 900 and h["latest_snapshot"]
+    assert set(h) == {"status", "latest_snapshot", "snapshots", "sites", "scored", "ask_enabled"}

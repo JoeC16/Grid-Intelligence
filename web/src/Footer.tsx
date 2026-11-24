@@ -89,10 +89,61 @@ function SourcesDialog({ meta, onClose }: { meta: Meta; onClose: () => void }) {
   );
 }
 
+function TermsDialog({ disclaimer, onClose }: { disclaimer: string; onClose: () => void }) {
+  const h = "mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500";
+  const p = "mt-1 text-xs leading-relaxed text-stone-700";
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 sm:items-center" onClick={onClose}>
+      <div role="dialog" aria-label="Terms of use" onClick={(e) => e.stopPropagation()}
+        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-t-lg bg-white p-5 shadow-xl sm:rounded-lg">
+        <div className="flex items-start justify-between">
+          <h2 className="text-base font-semibold text-stone-900">Terms of use</h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700">✕</button>
+        </div>
+        <p className="mt-1 text-[11px] text-stone-500">Draft for the pilot. To be reviewed by a lawyer before Grid Intelligence is sold.</p>
+        <h3 className={h}>Not a connection offer</h3>
+        <p className={p}>
+          Grid Intelligence is a screening tool. Nothing in it is an offer, quotation or guarantee of a connection, capacity
+          or timescale. Only the network operator can confirm what can connect, where and when; contact them before relying on any site.
+        </p>
+        <h3 className={h}>Published data, indicative only</h3>
+        <p className={p}>
+          {disclaimer} Figures come from network operators' open data as published on the dates shown, may be out of date or
+          contain errors, and are combined and scored by Grid Intelligence. The scores, rankings and roll-ups are our method,
+          described in our documentation, not the operator's view.
+        </p>
+        <h3 className={h}>AI answers</h3>
+        <p className={p}>
+          The Ask box answers from the same published data and is checked so that figures come from that data, but answers can
+          still be incomplete or wrong. Check important figures on the map, where every number links to its source.
+        </p>
+        <h3 className={h}>No warranty</h3>
+        <p className={p}>
+          The service is provided as is, without warranty of accuracy, completeness or fitness for a purpose. To the extent the
+          law allows, Grid Intelligence is not liable for decisions made using it.
+        </p>
+        <h3 className={h}>Data and licences</h3>
+        <p className={p}>
+          Contains data from UK Power Networks (CC BY 4.0), OS Open Names (Open Government Licence v3.0) and OpenStreetMap
+          contributors (ODbL). See Sources &amp; licences for every dataset and its publish date. Network operators do not endorse
+          this service.
+        </p>
+        <h3 className={h}>Privacy</h3>
+        <p className={p}>
+          No account is needed to view the map. If you use the Ask box, its access code is kept in your browser. For each
+          question we log technical details (tools used, size, timing, a one-way visitor hash) to run and protect the service, not
+          your IP address or the text of your question. Questions are sent to Anthropic to generate answers.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function Footer({ meta }: { meta: Meta | null }) {
   const [open, setOpen] = useState(false);
+  const [terms, setTerms] = useState(false);
   return (
-    <footer className="z-20 flex flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-stone-200 bg-white px-4 py-1.5 text-[11px] text-stone-500">
+    <footer className="z-20 flex print:hidden flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-stone-200 bg-white px-4 py-1.5 text-[11px] text-stone-500">
       <span className="font-medium text-stone-700">Published headroom is indicative and not guaranteed.</span>
       <span>
         Contains data from UK Power Networks (
@@ -103,7 +154,11 @@ export default function Footer({ meta }: { meta: Meta | null }) {
           Sources & licences
         </button>
       )}
+      <button type="button" onClick={() => setTerms(true)} className="font-medium text-stone-700 underline decoration-stone-300 underline-offset-2 hover:text-stone-900">
+        Terms
+      </button>
       {open && meta && <SourcesDialog meta={meta} onClose={() => setOpen(false)} />}
+      {terms && <TermsDialog disclaimer={meta?.disclaimer ?? "Published headroom is indicative and not guaranteed."} onClose={() => setTerms(false)} />}
     </footer>
   );
 }

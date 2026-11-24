@@ -59,3 +59,13 @@ def test_dataset_halving_between_snapshots_fails(tmp_path):
     res = {c.name: c for c in checks.check_bronze("UKPN", tmp_path)}
     assert not res["rows: a"].ok  # 1000 -> 500
     assert not res["no dataset missing from the latest snapshot"].ok  # b disappeared
+
+
+def test_snapshot_diff(tmp_path):
+    from pipeline.snapshot_diff import changed
+    a, b, c = (tmp_path / x for x in "abc")
+    for d, m in [(a, {"ds": {"modified": "2026-10-19", "rows": 5}}), (b, {"ds": {"modified": "2026-10-19", "rows": 5}}),
+                 (c, {"ds": {"modified": "2026-11-30", "rows": 6}})]:
+        d.mkdir()
+        (d / "_manifest.json").write_text(json.dumps(m))
+    assert not changed(a, b) and changed(b, c)
