@@ -206,9 +206,11 @@ Why: the best next move for a grid owner is the node where added capacity releas
 What the data supports (checked on GB, 2026-11-24): per BSP, the queue beyond its published headroom and the spare published headroom at the primaries under it. E.g. +50 MW at Three Bridges opens 23 MW of new demand and 2 sites for a 10 MW load; Northfleet East needs ~327 MW just to serve its queue before anything new opens. Shared upstream capacity is not double-counted: new demand = min(spare at the sites, headroom left upstream).
 
 Plan:
-- [ ] `pipeline/unlock.py`: unlock curve per upstream node for added MW steps (0, 10, 25, 50, 100, 200, 350): queued demand served, new capacity opened, sites able to take a given load; MW needed before anything new opens; flag sites that would also need their own upgrade. Tests with small fixtures.
-- [ ] `gold.unlock_mart` + `/unlock`; ranking of best next moves (MW unlocked per MW added at each step), with a "serve the queue" / "open new capacity" toggle.
-- [ ] What-if graph viewer: pick a node, drag "add MW", downstream sites light up as they unlock; every figure links to its sources.
-- [ ] Story chapter: where reinforcement goes furthest (GB and Spain).
-- [ ] Caveats in the UI and docs/SCORING.md: screening, not an engineering study; published headroom is indicative; no power flow; no reinforcement costs (check the heatmap's budget estimates as a hint).
+- [x] `pipeline/unlock.py`: unlock curve per upstream node for added MW steps (0, 10, 25, 50, 100, 200, 350): queued demand served, new capacity opened, sites able to take a given load; MW needed before anything new opens; flag sites that would also need their own upgrade. Tests with small fixtures.
+- [x] `gold.unlock_mart` + `/unlock`; ranking of best next moves (MW unlocked per MW added at each step), with a "serve the queue" / "open new capacity" toggle.
+- [x] What-if graph viewer: pick a node, drag "add MW", downstream sites light up as they unlock; every figure links to its sources.
+- [x] Story chapter: where reinforcement goes furthest (GB and Spain).
+- [x] Caveats in the UI and docs/SCORING.md: screening, not an engineering study; published headroom is indicative; no power flow; no reinforcement costs (check the heatmap's budget estimates as a hint).
 - Done when: both countries show an unlock ranking and the what-if viewer, with sources and caveats.
+- Phase 15 done (2026-11-24): `pipeline/unlock.py` + `gold.unlock_mart`/`unlock_curve` + `/unlock`; rankings use the gain from the added MW (not room the node already has); queue served split into "node alone" and "with local work"; Unlock panel (goal, +MW steps, ranked nodes) and a what-if slider on every node card (also linked from each site's Upstream section) that rings the sites it opens; browser maths checked equal to the pipeline on 3,576 node × step values; story chapter in both countries. Top moves at +50 MW: GB Maidstone Group (3 of 6 sites open for 10 MW), Spain COLLBLANC 220 kV (5 of 9 busbars). No £ costs in the data (UKPN "budget estimates" are quotes in MW, not costs).
+

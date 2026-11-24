@@ -217,6 +217,11 @@ def build_story(data: dict[str, pd.DataFrame], source: callable, dnos: list[dict
         "focus": {"view": "investor", "sort": "bsp", "network": True, **view},
     })
 
+    # 6b. Where new capacity goes furthest (Phase 15) ------------------------------------
+    uc = unlock_chapter(data.get("gold_unlock_mart"), "BSP", src("bsp_headroom_mw", "queue_mw", "demand_headroom_mw"), view)
+    if uc:
+        chapters.append(uc)
+
     # 7. What changes next ----------------------------------------------------------
     if len(snapshot_dates) >= 2 and len(ch):
         moved = ch[ch["level"] == "site"]["id"].nunique()
@@ -472,6 +477,12 @@ def build_story_es(data: dict[str, pd.DataFrame], source: callable, dno: dict) -
                       "highlight": near["site_id"].tolist(), "center": [lon0, lat0], "zoom": 9.6},
         })
 
+    # 5b. Where new capacity goes furthest (Phase 15) ------------------------------------
+    uc = unlock_chapter(data.get("gold_unlock_mart"), dno.get("upper_level", "transmission node"),
+                        src("bsp_headroom_mw", "topology", "queue_mw", "demand_headroom_mw"), view)
+    if uc:
+        chapters.append(uc)
+
     # 6. Next --------------------------------------------------------------------
     chapters.append({
         "id": "es_next",
@@ -491,3 +502,45 @@ def build_story_es(data: dict[str, pd.DataFrame], source: callable, dno: dict) -
         for f in c["facts"]:
             f["value"] = _num(f["value"]) if isinstance(f["value"], float) else f["value"]
     return {"chapters": chapters, "snapshots": [dno.get("snapshot_date")], "scenario": None}
+
+
+# ---------------------------------------------------------------- unlock --
+
+
+def unlock_chapter(um: pd.DataFrame, level: str, src: list[dict], view: dict) -> dict[str, Any] | None:
+    """'Where new capacity goes furthest', from gold.unlock_mart (Phase 15). None if there's nothing to say."""
+    if um is None or um.empty or "rank_new_50" not in um:
+        return None
+    levels = "BSPs" if level == "BSP" else "transmission nodes"
+    site = "sites" if level == "BSP" else "busbars"
+    load = um["load_mw"].iloc[0]
+    new = um[um["rank_new_50"].notna()].sort_values("rank_new_50").head(3)
+    queue = um[um["rank_queue_50"].notna()].sort_values("rank_queue_50").head(3)
+    big = um.sort_values("node_stuck_mw", ascending=False).iloc[0]
+    lines = [f"- **{r.name}**: +50 MW opens {_mw(r.new_50)} MW of new capacity; {_n(r.open_50)} of its {_n(r.sites)} "
+             f"{site} could then take a {load:g} MW connection" for r in new.itertuples()]
+    qlines = [f"- **{r.name}**: +50 MW serves {_mw(r.served_50)} MW of queued demand waiting only on it"
+              for r in queue.itertuples()]
+    body = (
+        f"Where would added capacity at a {level} unlock the most? For every {level} with published headroom, the gain from "
+        f"adding 50 MW, counting the {site} under it and never double-counting the {level}'s shared capacity.\n\n"
+        "**Open new capacity:**\n" + "\n".join(lines)
+        + ("\n\n**Serve the queue:**\n" + "\n".join(qlines) if len(qlines) else "")
+        + f"\n\nThe biggest queue is under **{big['name']}**: {_mw(big['node_stuck_mw'])} MW beyond its published headroom, "
+        f"but {_mw(big['needs_local_mw'])} MW of the queue under it is also beyond its {site}' own headroom, so an upgrade "
+        f"at the {level} alone serves {_mw(big['served_350'])} MW even at +350 MW.\n\n"
+        "Open Unlock for every node, and its what-if slider. Screening, not an engineering study: published headroom is "
+        "indicative, there's no power-flow model, and no reinforcement costs are published."
+    )
+    top = new.iloc[0] if len(new) else big
+    focus = {"view": "investor", "sort": "bsp", "network": True, "node": top["bsp_id"]}
+    if pd.notna(top["lat"]):
+        focus |= {"center": [float(top["lon"]), float(top["lat"])], "zoom": 9.5}
+    else:
+        focus |= view
+    return {
+        "id": "unlock", "title": "Where new capacity goes furthest", "body": body,
+        "facts": [{"label": f"{r.name}: new capacity from +50 MW", "value": r.new_50, "unit": "MW"} for r in new.itertuples()][:2]
+        + [{"label": f"{levels[0].upper() + levels[1:]} where +50 MW opens capacity", "value": int((um["new_50"] > 0).sum()), "unit": levels}],
+        "sources": src, "focus": focus,
+    }

@@ -180,3 +180,22 @@ def test_spain_upstream_chapter_traces_to_tree():
     assert facts["Busbars limited by their transmission node"] == int((es["limiting_level"] == "bsp").sum())
     assert facts["Transmission nodes at zero capacity"] == int((tx["headroom_mw"] <= 0).sum())
     assert ch["es_upstream"]["focus"]["network"] is True
+
+
+@needs_db
+def test_unlock_endpoint_and_story_trace_to_mart():
+    from pipeline import unlock
+    d = _load()
+    client = TestClient(app)
+    for country in sorted(set(d["sites"]["country"])):
+        u = client.get(f"/unlock?country={country}").json()
+        assert u["count"] > 0 and u["caveat"] and u["sources"]
+        nodes = {n["bsp_id"]: n for n in u["nodes"]}
+        # Recompute one node from the tables: the API serves exactly the pipeline's numbers.
+        top = min((n for n in u["nodes"] if n["rank_new_50"] is not None), key=lambda n: n["rank_new_50"])
+        kids = d["sites"][d["sites"]["bsp_id"] == top["bsp_id"]]
+        after = (kids["demand_headroom_mw"] - kids["queue_mw"]).dropna()
+        r = {x["added_mw"]: x for x in unlock.curve(top["headroom_mw"], top["queue_mw"], after, needs_local=top["needs_local_mw"])}
+        assert top["new_50"] == pytest.approx(r[50]["new_capacity_mw"] - r[0]["new_capacity_mw"], abs=1e-3)
+        ch = {c["id"]: c for c in client.get(f"/story?country={country}").json()["chapters"]}
+        assert ch["unlock"]["focus"]["node"] == top["bsp_id"] and top["bsp_id"] in nodes

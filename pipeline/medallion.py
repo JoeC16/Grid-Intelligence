@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from . import unlock
+
 # Columns kept per snapshot in silver (enough to diff and to rebuild any mart).
 SILVER_SITE_COLUMNS = [
     "site_id", "dno", "country", "operator", "capacity_taken_mw", "name", "licence_area", "voltage", "gsp", "bsp_id", "lat", "lon",
@@ -227,4 +229,5 @@ def build_gold(tables: dict[str, pd.DataFrame], scores: pd.DataFrame, silver: di
         "large_demand_by_year": large_demand_by_year(tables["large_demand"]),
         "changes": changes(silver["sites"], silver["bsps"]),
         "operator_mart": operator_mart(tables["sites"], scores),
+        **dict(zip(("unlock_mart", "unlock_curve"), unlock.build(tables["sites"], tables["bsps"]))),
     }
