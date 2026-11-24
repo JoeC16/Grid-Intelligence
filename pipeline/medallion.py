@@ -13,7 +13,7 @@ import pandas as pd
 
 # Columns kept per snapshot in silver (enough to diff and to rebuild any mart).
 SILVER_SITE_COLUMNS = [
-    "site_id", "dno", "name", "licence_area", "voltage", "gsp", "bsp_id", "lat", "lon",
+    "site_id", "dno", "country", "operator", "capacity_taken_mw", "name", "licence_area", "voltage", "gsp", "bsp_id", "lat", "lon",
     "firm_capacity_mw", "demand_headroom_mw", "observed_peak_mw", "queue_mw", "connections_last_year",
     "headroom_2030_mw", "effective_headroom_mw", "limiting_level", "scorable",
     "score", "rank", "stuck_mw", "stuck_rank",
@@ -74,7 +74,8 @@ def runs_out_year(headroom_scenarios: pd.DataFrame, scenario: str, from_year: in
 def site_mart(sites: pd.DataFrame, scores: pd.DataFrame, run_out: pd.Series) -> pd.DataFrame:
     m = sites.merge(scores[["site_id", "score", "rank", "stuck_mw", "stuck_rank", "utilisation"]], on="site_id", how="left")
     m["runs_out_year"] = m["site_id"].map(run_out).astype("Int64")
-    cols = ["site_id", "dno", "name", "licence_area", "voltage", "gsp", "bsp_id", "bsp_name", "lat", "lon",
+    cols = ["site_id", "dno", "country", "operator", "operator_name", "province", "municipality",
+            "name", "licence_area", "voltage", "gsp", "bsp_id", "bsp_name", "lat", "lon", "capacity_taken_mw",
             "scorable", "score", "rank", "demand_headroom_mw", "queue_mw", "stuck_mw", "stuck_rank",
             "effective_headroom_mw", "limiting_level", "headroom_2030_mw", "runs_out_year", "utilisation"]
     return m[cols]
@@ -137,7 +138,19 @@ def large_demand_by_year(large_demand: pd.DataFrame) -> pd.DataFrame:
         projects=("project_id", "count"), import_capacity_mva=("import_capacity_mva", "sum")).reset_index()
 
 
+CHANGE_COLUMNS = ["dno", "level", "id", "name", "measure", "previous", "latest", "change",
+                  "previous_snapshot", "latest_snapshot"]
+
+
 def changes(silver_sites: pd.DataFrame, silver_bsps: pd.DataFrame) -> pd.DataFrame:
+    """Latest vs previous snapshot, per DNO (each keeps its own snapshot dates)."""
+    parts = [_changes_one(silver_sites[silver_sites["dno"] == d], silver_bsps[silver_bsps["dno"] == d]).assign(dno=d)
+             for d in sorted(silver_sites["dno"].dropna().unique())]
+    parts = [p for p in parts if len(p)]
+    return pd.concat(parts, ignore_index=True)[CHANGE_COLUMNS] if parts else pd.DataFrame(columns=CHANGE_COLUMNS)
+
+
+def _changes_one(silver_sites: pd.DataFrame, silver_bsps: pd.DataFrame) -> pd.DataFrame:
     """Latest vs previous snapshot: what moved, per site and per BSP. Empty with one snapshot."""
     dates = sorted(silver_sites["snapshot_date"].unique())
     cols = ["level", "id", "name", "measure", "previous", "latest", "change", "previous_snapshot", "latest_snapshot"]
@@ -162,6 +175,45 @@ def changes(silver_sites: pd.DataFrame, silver_bsps: pd.DataFrame) -> pd.DataFra
     return pd.DataFrame(rows, columns=cols)
 
 
+def operator_mart(sites: pd.DataFrame, scores: pd.DataFrame) -> pd.DataFrame:
+    """One row per distribution network operator: the "which networks to buy or expand" view.
+
+    Busbars/sites published, how many have no published headroom left, MW of published
+    headroom, MW queued, MW stuck (queue beyond headroom, summed over sites), MW already
+    taken, and the operator's most stuck site. Sums are indicative: the CNMC notes that
+    capacities at neighbouring nodes affect each other, so they aren't strictly additive.
+    """
+    s = sites.merge(scores[["site_id", "score", "stuck_mw"]], on="site_id", how="left")
+    s["stuck_mw"] = s["stuck_mw"].fillna((s["queue_mw"] - s["demand_headroom_mw"]).clip(lower=0))
+    s["_zero"] = s["demand_headroom_mw"] <= 0
+    g = s.groupby(["country", "dno", "operator"], dropna=False)
+    m = g.agg(
+        operator_name=("operator_name", "first"),
+        licence_area=("licence_area", "first"),
+        sites=("site_id", "count"),
+        scored_sites=("score", "count"),
+        substations=("name", lambda x: x.str.replace(r" [\d.]+ kV.*$", "", regex=True).nunique()),
+        provinces=("province", lambda x: ", ".join(sorted(x.dropna().astype(str).unique())[:6])),
+        province_count=("province", "nunique"),
+        sites_zero_headroom=("_zero", "sum"),
+        headroom_mw=("demand_headroom_mw", "sum"),
+        queue_mw=("queue_mw", "sum"),
+        stuck_mw=("stuck_mw", "sum"),
+        capacity_taken_mw=("capacity_taken_mw", "sum"),
+        median_score=("score", "median"),
+    ).reset_index()
+    m["share_zero_headroom"] = m["sites_zero_headroom"] / m["sites"]
+    top = s[s["stuck_mw"] > 0].sort_values("stuck_mw", ascending=False).drop_duplicates(["country", "operator"])
+    m = m.merge(top[["country", "operator", "site_id", "name", "stuck_mw"]].rename(
+        columns={"site_id": "top_site_id", "name": "top_site_name", "stuck_mw": "top_site_stuck_mw"}),
+        on=["country", "operator"], how="left")
+    m["capacity_taken_mw"] = m["capacity_taken_mw"].where(m["capacity_taken_mw"] > 0)
+    # Rank within each country by MW stuck (sites with any stuck demand only).
+    m["stuck_rank"] = m.groupby("country")["stuck_mw"].transform(
+        lambda x: x.where(x > 0).round(3).rank(ascending=False, method="min")).astype("Int64")
+    return m.sort_values(["country", "stuck_mw"], ascending=[True, False]).reset_index(drop=True)
+
+
 def build_gold(tables: dict[str, pd.DataFrame], scores: pd.DataFrame, silver: dict[str, pd.DataFrame],
                scenario: str, from_year: int, running_out_by: int = 2030) -> dict[str, pd.DataFrame]:
     run_out = runs_out_year(tables["headroom_scenarios"], scenario, from_year)
@@ -174,4 +226,5 @@ def build_gold(tables: dict[str, pd.DataFrame], scores: pd.DataFrame, silver: di
         "headroom_timeline": headroom_timeline(tables["headroom_scenarios"], smart),
         "large_demand_by_year": large_demand_by_year(tables["large_demand"]),
         "changes": changes(silver["sites"], silver["bsps"]),
+        "operator_mart": operator_mart(tables["sites"], scores),
     }

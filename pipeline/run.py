@@ -14,6 +14,7 @@ import duckdb
 import pandas as pd
 
 from .adapters.base import DNOAdapter
+from .adapters.cnmc_es import CNMCSpainAdapter
 from .adapters.ukpn import UKPNAdapter
 from . import checks, medallion
 from .normalise import build_all
@@ -21,7 +22,7 @@ from .score import load_config, print_all_tops, score, write_scores
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "grid.duckdb"
 
-ADAPTERS: list[DNOAdapter] = [UKPNAdapter()]
+ADAPTERS: list[DNOAdapter] = [UKPNAdapter(), CNMCSpainAdapter()]
 
 
 def _write(con: duckdb.DuckDBPyConnection, name: str, df: pd.DataFrame) -> None:
@@ -54,8 +55,10 @@ def build(adapters: list[DNOAdapter], db_path: Path = DB_PATH, refresh: bool = F
             tables.setdefault(name, []).append(df)
         silver_parts += _silver_for(adapter, signals, views)
     combined = {name: pd.concat(dfs, ignore_index=True) for name, dfs in tables.items()}
-    combined["dnos"] = pd.DataFrame([a.info.as_row() for a in adapters])
-    # One national ranking: percentiles across every site from every adapter (docs/SCORING.md).
+    combined["dnos"] = pd.DataFrame([
+        a.info.as_row() | {"data_period": a.period() if hasattr(a, "period") else None,
+                           "snapshot_date": a.snapshot_date} for a in adapters])
+    # Percentiles and ranks within each country, across every DNO in it (docs/SCORING.md).
     scores = score(combined["sites"], signals, views)
     silver = {k: pd.concat([p[k] for p in silver_parts], ignore_index=True) for k in ("sites", "bsps", "gsps")}
     silver["nodes"] = medallion.graph_nodes(combined, combined["field_sources"])

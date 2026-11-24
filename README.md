@@ -54,7 +54,9 @@ To run the production setup locally: `uv run uvicorn app:app --port 8000` after 
 
 ## Data sources and licences
 
-All data from the [UK Power Networks Open Data Portal](https://ukpowernetworks.opendatasoft.com/). Contains data from UK Power Networks, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+### Great Britain: UK Power Networks
+
+All GB data from the [UK Power Networks Open Data Portal](https://ukpowernetworks.opendatasoft.com/). Contains data from UK Power Networks, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 | Dataset ID | Used for | Licence |
 |---|---|---|
@@ -69,6 +71,18 @@ All data from the [UK Power Networks Open Data Portal](https://ukpowernetworks.o
 | `ukpn-gsp-project-status` | GSP generation queue (exploratory, not scored) | CC BY 4.0 |
 | `ukpn-overall-queue-insights` | UKPN-wide queue totals (exploratory) | CC BY 4.0 |
 
-Place names in the AI ask box are located with **OS Open Names** via [postcodes.io](https://postcodes.io/): contains OS data © Crown copyright and database right, licensed under the [Open Government Licence v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/). Only the place name is sent.
+### Spain: CNMC capacity maps
+
+Spanish data from the CNMC's demand capacity maps ([Mapas de capacidad de acceso](https://www.cnmc.es/sectores-que-regulamos/energia/supervision-del-mercado-electrico/informe-acceso-y-conexion-redes)), which combine what every distribution and transmission network operator reports under Circular informativa 6/2025. Read from the maps' public ArcGIS feature services (no key). **Fuente: CNMC.**
+
+Licence: the CNMC publishes its open data under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) ([CNMC|Data conditions of use](https://data.cnmc.es/condiciones-de-uso)), which allows commercial reuse with attribution, under Spain's public-sector reuse law (Ley 37/2007, RD 1495/2011). The capacity maps aren't listed on CNMC|Data itself, so we apply those terms: attribute the CNMC, don't alter the figures, show the data period, and share derived Spanish data (the exported JSON and CSV) under the same licence. **To confirm in the legal review.**
+
+| Dataset ID (our name) | CNMC layer | Used for | Licence |
+|---|---|---|---|
+| `cnmc-demanda-en-distribucion` | `Demanda_en_Distribucion` layer 4 | every distribution busbar above 1 kV: published headroom (firm demand access capacity available), capacity taken, requests admitted and not evaluated, distributor, location | CC BY-SA 4.0 |
+| `cnmc-demanda-en-transporte` | `Demanda_en_Transporte_v2` layer 11 | transmission busbars (stored in bronze, not shown yet) | CC BY-SA 4.0 |
+| `cnmc-capacidad-periodo` | `Capacidad_Periodo` layer 10 | the month the figures describe | CC BY-SA 4.0 |
+
+Place names in the AI ask box are located with **OS Open Names** via [postcodes.io](https://postcodes.io/): contains OS data © Crown copyright and database right, licensed under the [Open Government Licence v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/). Only the place name is sent. Spanish places are looked up in the municipality names of the CNMC data itself (nothing is sent anywhere).
 
 Headroom figures are published firm-capacity headroom and are indicative only — not a guarantee of available capacity.

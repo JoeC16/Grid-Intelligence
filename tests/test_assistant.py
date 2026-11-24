@@ -99,27 +99,30 @@ def test_locate_place_errors_are_reported():
 
 
 def _args(**kw):
-    base = {k: None for k in ["near", "min_headroom_mw", "licence_areas", "voltages_kv", "gsp",
+    base = {k: None for k in ["near", "min_headroom_mw", "licence_areas", "operator_contains", "voltages_kv", "gsp",
                               "min_score", "name_contains", "limit"]}
-    return {**base, **kw}
+    return {**base, "country": "GB", **kw}
 
 
 @needs_db
 def test_search_by_score_matches_map_ranking():
     out = assistant.search_sites(_load()["sites"], _args(rank_by="score", limit=3))
     first = out["results"][0]
-    assert first["name"] == "Bow 11kV" and first["result_rank"] == 1 and first["score_rank_all"] == 1
+    assert first["name"] == "Bow 11kV" and first["result_rank"] == 1 and first["score_rank_in_country"] == 1
     assert out["total_matches"] == 959
 
 
 @needs_db
 def test_search_developer_matches_pipeline():
     sites = _load()["sites"]
-    for rank_by, col in [("effective_headroom", "developer_rank"), ("headroom_after_queue", "developer_rank_local")]:
-        out = assistant.search_sites(sites, _args(rank_by=rank_by, min_headroom_mw=50, limit=25))
-        assert out["total_matches"] == int(sites[col].notna().sum())
-        for r in out["results"]:
-            assert r["result_rank"] == sites.loc[sites.site_id == r["site_id"], col].iloc[0], (rank_by, r)
+    pairs = [("effective_headroom", "developer_rank"), ("headroom_after_queue", "developer_rank_local")]
+    for country in ("GB", "ES"):
+        mine = sites[sites["country"] == country]
+        for rank_by, col in pairs:
+            out = assistant.search_sites(sites, _args(rank_by=rank_by, min_headroom_mw=50, limit=25, country=country))
+            assert out["total_matches"] == int(mine[col].notna().sum())
+            for r in out["results"]:
+                assert r["result_rank"] == sites.loc[sites.site_id == r["site_id"], col].iloc[0], (rank_by, r)
 
 
 @needs_db
@@ -322,3 +325,26 @@ def test_prompt_and_tools_name_every_network_covered():
              for t in assistant.tools_for(["LPN", "SPN", "EPN", "SPM", "SPD"])
              if "licence_areas" in t["input_schema"]["properties"]]
     assert enums and all(e == ["EPN", "LPN", "SPD", "SPM", "SPN"] for e in enums)
+
+
+@needs_db
+def test_spain_search_and_municipality_lookup():
+    sites = _load()["sites"]
+    out = assistant.search_sites(sites, _args(rank_by="stuck_mw", country="ES", limit=3))
+    es = sites[(sites["country"] == "ES") & (sites["stuck_mw"] > 0) & sites["score"].notna()]
+    assert out["total_matches"] == len(es)
+    top = out["results"][0]
+    assert top["country"] == "ES" and top["distributor"] and "gsp" not in top
+    assert top["stuck_mw"] == assistant._num(es["stuck_mw"].max())
+    loc = assistant.run_tool("locate_place", {"name": "Vall d'Alba", "country": "ES"}, sites, lambda _: {})
+    assert loc["candidates"][0]["name"] == "Vall d'Alba" and 40 < loc["candidates"][0]["lat"] < 40.3
+    assert "castellon" == assistant._fold("Castellón")
+
+
+def test_prompt_mentions_spain_only_when_covered():
+    gb = [{"code": "UKPN", "name": "UK Power Networks", "region": "the South East", "licence_areas": ["LPN"], "country": "GB"}]
+    es = gb + [{"code": "ES", "name": "Spain's distribution networks", "region": "Spain", "licence_areas": ["i-DE"],
+                "country": "ES", "data_period": "2026-10"}]
+    assert "CNMC" not in assistant.system_prompt(gb) and "{spain}" not in assistant.system_prompt(gb)
+    p = assistant.system_prompt(es)
+    assert "CNMC" in p and "2026-10" in p and "never compare a Spanish score" in p

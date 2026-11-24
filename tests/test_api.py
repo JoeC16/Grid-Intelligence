@@ -13,7 +13,9 @@ client = TestClient(app)
 
 def test_meta():
     m = client.get("/meta").json()
-    assert m["licence_areas"] == ["EPN", "LPN", "SPN"]
+    countries = {c["code"]: c for c in m["countries"]}
+    assert countries["GB"]["licence_areas"] == ["LPN", "SPN", "EPN"]
+    assert set(countries) <= {"GB", "ES"}
     views = {v["key"]: v for v in m["views"]}
     assert sum(views["investor"]["weights"].values()) == 100
     assert views["developer"]["type"] == "filter_rank"

@@ -37,7 +37,7 @@ MAX_ROUNDS = 8
 PLACES_URL = "https://api.postcodes.io/places"
 PLACES_SOURCE = "Ordnance Survey OS Open Names via postcodes.io (Open Government Licence v3.0)"
 
-SYSTEM_PROMPT = """You answer questions about primary substations run by {coverage}, for grid investors and for developers looking to connect new demand such as data centres. The data covers demand only.
+SYSTEM_PROMPT = """You answer questions about distribution substations run by {coverage}, for grid investors and for developers looking to connect new demand such as data centres. The data covers demand only.
 
 Use the tools to look things up. Every number in your answer must appear in a tool result: MW, distances, ranks, scores, counts and percentages. Don't estimate, round differently or do arithmetic of your own; if a figure you'd like isn't in a tool result, describe it in words or say the data doesn't include it.
 
@@ -52,7 +52,7 @@ The data has no connection dates or lead times. If asked how fast or soon someth
 
 The network is a tree: each primary substation hangs off a bulk supply point (BSP), which hangs off a grid supply point (GSP); some primaries are fed directly from the GSP. Effective headroom = the lower of a site's headroom after queue and its BSP's headroom after the queue of every site under it; it is what limits a new connection, and it is what the map's developer view ranks on. Use get_upstream to explain what limits a site, get_siblings for what shares its supply, and search_bsps for questions about BSPs. GSPs publish no MW headroom, only import utilisation (peak / capacity). For a BSP, put its own board's site_id (when it has one) in site_ids.
 
-For any place name, call locate_place first, then search near the coordinates it returns. If the place is outside the area covered, say so and give the nearest sites the search returned.
+{spain}For any place name, call locate_place first, then search near the coordinates it returns. If the place is outside the area covered, say so and give the nearest sites the search returned.
 
 Keep the answer short: a sentence or two, then the top few sites with their key figures. Put the site_ids you mention in site_ids, best first."""
 
@@ -78,13 +78,18 @@ _nullable = lambda t: {"anyOf": [t, {"type": "null"}]}  # noqa: E731
 TOOLS = [
     {
         "name": "locate_place",
-        "description": "Find the latitude and longitude of a UK place name (town, city, district). "
-        "Returns up to 3 candidates, larger settlements first.",
+        "description": "Find the latitude and longitude of a place name. Great Britain: towns, cities and districts "
+        "(OS Open Names). Spain: municipalities named in the CNMC capacity data (the centre of their busbars). "
+        "Returns up to 3 candidates.",
         "strict": True,
         "input_schema": {
             "type": "object",
-            "properties": {"name": {"type": "string", "description": "Place name, e.g. 'Slough'."}},
-            "required": ["name"],
+            "properties": {
+                "name": {"type": "string", "description": "Place name, e.g. 'Slough' or 'Coslada'."},
+                "country": _nullable({"type": "string", "enum": ["GB", "ES"],
+                                      "description": "Where to look; null = Great Britain first, then Spain."}),
+            },
+            "required": ["name", "country"],
             "additionalProperties": False,
         },
     },
@@ -118,15 +123,18 @@ TOOLS = [
                     "additionalProperties": False,
                 }),
                 "min_headroom_mw": _nullable({"type": "number"}),
+                "country": _nullable({"type": "string", "enum": ["GB", "ES"],
+                                      "description": "GB or ES. Scores and ranks are within a country; null = both."}),
                 "licence_areas": _nullable({"type": "array", "items": {"type": "string", "enum": ["LPN", "SPN", "EPN"]}}),
+                "operator_contains": _nullable({"type": "string", "description": "Spain: part of the distributor's name, e.g. 'UFD'."}),
                 "voltages_kv": _nullable({"type": "array", "items": {"type": "number"}}),
                 "gsp": _nullable({"type": "string"}),
                 "min_score": _nullable({"type": "number"}),
                 "name_contains": _nullable({"type": "string"}),
                 "limit": _nullable({"type": "integer", "description": "Results to return, default 10, max 25."}),
             },
-            "required": ["rank_by", "near", "min_headroom_mw", "licence_areas", "voltages_kv",
-                         "gsp", "min_score", "name_contains", "limit"],
+            "required": ["rank_by", "near", "min_headroom_mw", "country", "licence_areas", "operator_contains",
+                         "voltages_kv", "gsp", "min_score", "name_contains", "limit"],
             "additionalProperties": False,
         },
     },
@@ -220,6 +228,10 @@ def _num(v: Any, digits: int = 1) -> float | None:
 def search_sites(sites: pd.DataFrame, args: dict) -> dict:
     """Filter + rank. Ranks are computed across all matching scorable sites (as the map does)."""
     df = sites[sites["score"].notna()].copy()  # scorable only
+    if args.get("country") and "country" in df:
+        df = df[df["country"] == args["country"]]
+    if args.get("operator_contains") and "operator_name" in df:
+        df = df[df["operator_name"].fillna("").str.lower().str.contains(args["operator_contains"].lower(), regex=False)]
     if args.get("licence_areas"):
         df = df[df["licence_area"].isin(args["licence_areas"])]
     if args.get("voltages_kv"):
@@ -265,10 +277,16 @@ def search_sites(sites: pd.DataFrame, args: dict) -> dict:
             "bsp": r.get("bsp_name"),
             "stuck_mw": _num(r["stuck_mw"]),
             "stuck_demand_score": _num(r["score"]),
-            "score_rank_all": None if pd.isna(r["rank"]) else int(r["rank"]),
+            "country": r.get("country"),
+            "score_rank_in_country": None if pd.isna(r["rank"]) else int(r["rank"]),
             "utilisation_pct": None if pd.isna(r["utilisation"]) else round(100 * r["utilisation"], 1),
             "published_headroom_2030_mw": _num(r["headroom_2030_mw"]),
         }
+        if r.get("country") == "ES":
+            row.update({"distributor": r.get("operator_name"), "municipality": r.get("municipality"),
+                        "province": r.get("province"), "capacity_taken_mw": _num(r.get("capacity_taken_mw"))})
+            for k in ("gsp", "bsp", "limited_by", "published_headroom_2030_mw"):
+                row.pop(k, None)  # not published for Spain
         if near:
             row["distance_km"] = round(float(r["distance_km"]), 1)
         rows.append(row)
@@ -276,8 +294,8 @@ def search_sites(sites: pd.DataFrame, args: dict) -> dict:
         "total_matches": int(len(df)),
         "stuck_demand_score_scale": [0, 100],
         "results": rows,
-        "note": "result_rank ranks the matches by rank_by; score_rank_all is the rank by stuck-demand score "
-        "among all scored primaries in every network covered (one national ranking).",
+        "note": "result_rank ranks the matches by rank_by; score_rank_in_country is the rank by stuck-demand score "
+        "among all scored sites in the same country. Don't compare scores or ranks across countries.",
     }
 
 
@@ -386,10 +404,43 @@ def search_bsps(bsps: pd.DataFrame, args: dict) -> dict:
             "headroom_after_queue_mw": _num(r["headroom_after_queue_mw"]), "stuck_mw": _num(r["stuck_mw"]),
             "stuck_rank_among_bsps": None if pd.isna(r["stuck_rank"]) else int(r["stuck_rank"]),
         }
+        if r.get("country") == "ES":
+            row.update({"distributor": r.get("operator_name"), "municipality": r.get("municipality"),
+                        "province": r.get("province"), "capacity_taken_mw": _num(r.get("capacity_taken_mw"))})
+            for k in ("gsp", "bsp", "limited_by", "published_headroom_2030_mw"):
+                row.pop(k, None)  # not published for Spain
         if near:
             row["distance_km"] = round(float(r["distance_km"]), 1)
         rows.append(row)
     return {"total_matches": int(len(df)), "results": rows}
+
+
+MUNICIPALITY_SOURCE = "Municipality names in the CNMC capacity data (the centre of each municipality's busbars)"
+
+
+def locate_municipality(name: str, sites: pd.DataFrame) -> dict:
+    """Spain: a municipality named in the data, located at the centre of its busbars."""
+    if "municipality" not in sites:
+        return {"error": f"No Spanish place called {name!r} found."}
+    es = sites[sites["municipality"].notna()]
+    key = _fold(name)
+    names = es["municipality"].map(_fold)
+    hit = es[names == key]
+    if hit.empty:
+        hit = es[names.str.contains(key, regex=False)]
+    if hit.empty:
+        return {"error": f"No Spanish municipality called {name!r} in the data."}
+    g = hit.groupby(["municipality", "province"]).agg(lat=("lat", "mean"), lon=("lon", "mean"), busbars=("site_id", "count"))
+    g = g.sort_values("busbars", ascending=False).head(3).reset_index()
+    return {"candidates": [{"name": r.municipality, "type": "Municipality", "area": r.province, "region": "Spain",
+                            "lat": round(r.lat, 4), "lon": round(r.lon, 4)} for r in g.itertuples()],
+            "source": MUNICIPALITY_SOURCE}
+
+
+def _fold(s: str) -> str:
+    """Lower case, accents removed: 'Castellón' -> 'castellon'."""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFKD", str(s).lower()) if not unicodedata.combining(c)).strip()
 
 
 def locate_place(name: str, fetch: Callable[[str, dict], dict] | None = None) -> dict:
@@ -480,8 +531,15 @@ def _coverage(dnos: list[dict]) -> str:
         f"{d['name']} ({d['code']}) in {d['region']} (licence areas {', '.join(d['licence_areas'])})" for d in dnos)
 
 
+SPAIN_NOTE = """Spain is covered too, from the CNMC's demand capacity map ({period}). For Spain: each site is a substation busbar above 1 kV; published headroom = firm demand access capacity available; queue = requests admitted and not yet evaluated; capacity taken = access capacity already granted; utilisation = taken / (taken + published headroom). Spain publishes no BSP/GSP tree, no forecasts and no recent connection counts, so get_upstream, get_siblings and search_bsps don't apply. Scores and ranks are within each country: never compare a Spanish score or rank with a British one. Use country "ES" in search_sites and locate_place for Spanish questions, and say "distributor" for the Spanish operator.
+
+"""
+
+
 def system_prompt(dnos: list[dict]) -> str:
-    return SYSTEM_PROMPT.replace("{coverage}", _coverage(dnos))
+    es = next((d for d in dnos if d.get("country") == "ES"), None)
+    spain = SPAIN_NOTE.replace("{period}", str(es.get("data_period") or "latest month")) if es else ""
+    return SYSTEM_PROMPT.replace("{coverage}", _coverage(dnos)).replace("{spain}", spain)
 
 
 def tools_for(areas: list[str]) -> list[dict]:
@@ -610,7 +668,14 @@ def run_tool(name: str, args: dict, sites: pd.DataFrame, get_site: Callable[[str
         if name == "get_site":
             return site_for_model(get_site(args["site_id"]))
         if name == "locate_place":
-            return locate_place(args["name"])
+            country = args.get("country")
+            if country == "ES":
+                return locate_municipality(args["name"], sites)
+            found = locate_place(args["name"])
+            if country is None and "error" in found:
+                es = locate_municipality(args["name"], sites)
+                return es if "error" not in es else found
+            return found
         return {"error": f"Unknown tool {name}"}
     except KeyError as exc:
         return {"error": f"Not found: {exc}"}

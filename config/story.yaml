@@ -1,0 +1,11 @@
+# Story settings (backend/story.py). Numbers are always computed from the data;
+# this file only says which place to use as a worked example.
+
+ES:
+  # A worked example: one substation and everything published within radius_km of it.
+  example:
+    title: "Around La Barona"
+    place: "La Barona (Vall d'Alba, Castellón)"
+    # site_id prefix of the example substation's busbars in the CNMC data (all voltages)
+    site_prefix: "ES-R1-001-ST-VALL-D-ALBA-CAST-"
+    radius_km: 25

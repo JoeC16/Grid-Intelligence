@@ -4,7 +4,7 @@ Usage:  uv run python -m backend.export_static      (after the pipeline run and 
 
 Writes public/ (git-ignored): a copy of web/dist plus public/data/<name>.json for
 the endpoints that only change when the data is rebuilt (meta, sites, bsps, gsps,
-network, story). On Vercel, files in public/ are served from the CDN, so
+network, and each country's story and operators). On Vercel, files in public/ are served from the CDN, so
 the first screen loads without waiting for the Python function to start. Each
 file is exactly what the API returns (same code path, via a test client). The
 web app falls back to the live API whenever a file is missing.
@@ -32,8 +32,16 @@ ENDPOINTS = {
     "bsps": "/bsps",
     "gsps": "/gsps",
     "network": "/network",
-    "story": "/story",
 }
+
+
+def endpoints(client: TestClient) -> dict[str, str]:
+    """ENDPOINTS plus, for each country in the data, its story (story-GB.json) and operators (operators-ES.json)."""
+    out = dict(ENDPOINTS)
+    for c in client.get("/meta").json().get("countries", []):
+        out[f"story-{c['code']}"] = f"/story?country={c['code']}"
+        out[f"operators-{c['code']}"] = f"/operators?country={c['code']}"
+    return out
 
 
 def export(public: Path = PUBLIC, dist: Path = DIST) -> dict[str, int]:
@@ -45,7 +53,7 @@ def export(public: Path = PUBLIC, dist: Path = DIST) -> dict[str, int]:
     (public / "data").mkdir()
     sizes = {}
     with TestClient(app) as client:
-        for name, path in ENDPOINTS.items():
+        for name, path in endpoints(client).items():
             r = client.get(path)
             r.raise_for_status()
             body = json.dumps(r.json(), separators=(",", ":"))

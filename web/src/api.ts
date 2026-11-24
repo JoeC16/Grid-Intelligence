@@ -42,6 +42,33 @@ export interface DnoInfo {
   map_center: [number, number];
   map_zoom: number;
   site_count: number;
+  country: string;
+  publisher: string;
+  has_topology: boolean;
+  data_period: string | null;
+  snapshot_date: string | null;
+}
+
+/** A country covered. Sites are scored and ranked within their country. */
+export interface CountryInfo {
+  code: string; // "GB" | "ES"
+  name: string;
+  dnos: string[];
+  licence_areas: string[];
+  voltages: number[];
+  site_count: number;
+  scored_count: number;
+  map_center: [number, number];
+  map_zoom: number;
+  has_topology: boolean;
+  data_period: string | null; // e.g. "2026-10" (Spain: the CNMC month)
+}
+
+/** "2026-10" -> "October 2026". */
+export function monthLabel(period: string | null | undefined): string {
+  if (!period) return "";
+  const d = new Date(`${period}-01T00:00:00Z`);
+  return isNaN(d.getTime()) ? period : d.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
 }
 
 /** "UK Power Networks", or "UK Power Networks and SP Energy Networks". */
@@ -51,9 +78,9 @@ export function networkNames(dnos: DnoInfo[] | undefined, fallback = "the networ
   return names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-/** "UK Power Networks (CC BY 4.0)" per DNO, comma-joined. */
+/** "UK Power Networks (CC BY 4.0), CNMC (CC BY-SA 4.0)": who to credit, per DNO. */
 export function dataCredit(dnos: DnoInfo[] | undefined): string {
-  return (dnos ?? []).map((d) => `${d.name} (${d.licence})`).join(", ");
+  return (dnos ?? []).map((d) => `${d.publisher || d.name} (${d.licence})`).join(", ");
 }
 
 export interface Meta {
@@ -66,12 +93,15 @@ export interface Meta {
   views: ViewMeta[];
   headroom_2030_scenario: string;
   dnos: DnoInfo[];
+  countries: CountryInfo[];
   sources: (Source & { dno: string; field: string; licence: string })[];
 }
 
 export interface SiteProps {
   site_id: string;
   dno: string;
+  country: string;
+  operator: string | null;
   name: string;
   licence_area: string;
   voltage: number;
@@ -122,6 +152,12 @@ export interface Signal {
 export interface SiteDetail {
   site_id: string;
   dno: string;
+  country: string | null;
+  operator: string | null;
+  operator_name: string | null;
+  province: string | null;
+  municipality: string | null;
+  reserved: boolean;
   name: string;
   lat: number;
   lon: number;
@@ -137,7 +173,7 @@ export interface SiteDetail {
   exclude_reason: string | null;
   score_missing: string | null;
   signals: Signal[];
-  capacity: { firm_capacity_mw: number | null; observed_peak_mw: number | null; source: Source | null };
+  capacity: { firm_capacity_mw: number | null; observed_peak_mw: number | null; capacity_taken_mw: number | null; source: Source | null };
   headroom_2030: { values: { scenario: string; value: number | null; default: boolean }[]; source: Source | null };
   location_source: Source | null;
   upstream: {
@@ -268,7 +304,7 @@ export interface StoryChapter {
   number: number;
   title: string;
   body: string;
-  facts: { label: string; value: number; unit: string }[];
+  facts: { label: string; value: number | string; unit: string }[];
   sources: Source[];
   focus: {
     view: "investor" | "developer";
@@ -278,10 +314,41 @@ export interface StoryChapter {
     zoom: number;
     select?: string;
     highlight?: string[];
+    areas?: string[];
   };
 }
 
-export const fetchStory = () => staticOrApi<{ chapters: StoryChapter[]; snapshots: string[]; scenario: string }>("story", "/story");
+export const fetchStory = (country: string) =>
+  staticOrApi<{ chapters: StoryChapter[]; snapshots: string[]; scenario: string | null }>(`story-${country}`, `/story?country=${country}`);
+
+/** A distribution network operator (Spain: one of ~59 distributors). gold.operator_mart. */
+export interface OperatorRow {
+  country: string;
+  dno: string;
+  operator: string;
+  operator_name: string;
+  licence_area: string;
+  sites: number;
+  scored_sites: number;
+  substations: number;
+  provinces: string;
+  province_count: number;
+  sites_zero_headroom: number;
+  share_zero_headroom: number;
+  headroom_mw: number;
+  queue_mw: number;
+  stuck_mw: number;
+  capacity_taken_mw: number | null;
+  median_score: number | null;
+  top_site_id: string | null;
+  top_site_name: string | null;
+  top_site_stuck_mw: number | null;
+  stuck_rank: number | null;
+}
+
+export const fetchOperators = (country: string) =>
+  staticOrApi<{ country: string; count: number; operators: OperatorRow[]; sources: Record<string, Source | null>; note: string }>(
+    `operators-${country}`, `/operators?country=${country}`);
 export const fetchNetwork = () => staticOrApi<GeoJSON.FeatureCollection>("network", "/network");
 
 export interface GspRow {

@@ -32,6 +32,7 @@ jobs:
     timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
+      BRONZE_DNOS: "ukpn es"  # bronze folders under data/bronze/, one per adapter
     steps:
       - name: Check configuration
         env:
@@ -56,36 +57,42 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --frozen
 
+      # One bronze archive per DNO and snapshot day, kept as release assets:
+      # snapshot-<dno>-<day> / bronze-<dno>-<day>.tar.gz (dno: ukpn, es).
       - name: Restore earlier snapshots
         run: |
-          mkdir -p data/bronze/ukpn
-          for tag in $(gh release list --limit 200 --json tagName --jq '.[].tagName | select(startswith("snapshot-ukpn-"))'); do
-            day="${tag#snapshot-ukpn-}"
-            gh release download "$tag" --pattern "bronze-ukpn-${day}.tar.gz" --dir /tmp/bronze
-            tar -xzf "/tmp/bronze/bronze-ukpn-${day}.tar.gz" -C data/bronze/ukpn
+          for dno in $BRONZE_DNOS; do
+            mkdir -p "data/bronze/$dno"
+            for tag in $(gh release list --limit 300 --json tagName --jq ".[].tagName | select(startswith(\"snapshot-${dno}-\"))"); do
+              day="${tag#snapshot-${dno}-}"
+              gh release download "$tag" --pattern "bronze-${dno}-${day}.tar.gz" --dir /tmp/bronze
+              tar -xzf "/tmp/bronze/bronze-${dno}-${day}.tar.gz" -C "data/bronze/$dno"
+            done
+            ls "data/bronze/$dno" || true
           done
-          ls data/bronze/ukpn || true
 
       - name: Take a new snapshot, build and check
         env:
           UKPN_API_KEY: ${{ secrets.UKPN_API_KEY }}
         run: uv run python -m pipeline.run --refresh
 
-      - name: Store the snapshot if anything changed
+      - name: Store the snapshots if anything changed
         run: |
-          day=$(ls data/bronze/ukpn | sort | tail -1)
-          prev=$(ls data/bronze/ukpn | sort | tail -2 | head -1)
-          changed=$(uv run python -m pipeline.snapshot_diff "data/bronze/ukpn/$prev" "data/bronze/ukpn/$day")
-          echo "latest=$day previous=$prev changed=$changed"
-          if [ "$changed" = "true" ] || [ "$prev" = "$day" ]; then
-            tar -czf "bronze-ukpn-${day}.tar.gz" -C data/bronze/ukpn "$day"
-            gh release create "snapshot-ukpn-${day}" "bronze-ukpn-${day}.tar.gz" \
-              --title "UKPN data snapshot ${day}" \
-              --notes "Raw UKPN Open Data Portal downloads (CC BY 4.0), bronze layer. See docs/DATA_MODEL.md." \
-              || gh release upload "snapshot-ukpn-${day}" "bronze-ukpn-${day}.tar.gz" --clobber
-          else
-            echo "No dataset republished since ${prev}: snapshot not stored."
-          fi
+          for dno in $BRONZE_DNOS; do
+            day=$(ls "data/bronze/$dno" | sort | tail -1)
+            prev=$(ls "data/bronze/$dno" | sort | tail -2 | head -1)
+            changed=$(uv run python -m pipeline.snapshot_diff "data/bronze/$dno/$prev" "data/bronze/$dno/$day")
+            echo "$dno: latest=$day previous=$prev changed=$changed"
+            if [ "$changed" = "true" ] || [ "$prev" = "$day" ]; then
+              tar -czf "bronze-${dno}-${day}.tar.gz" -C "data/bronze/$dno" "$day"
+              gh release create "snapshot-${dno}-${day}" "bronze-${dno}-${day}.tar.gz" \
+                --title "${dno} data snapshot ${day}" \
+                --notes "Raw open data downloads for ${dno} (bronze layer; licences in README.md). See docs/DATA_MODEL.md." \
+                || gh release upload "snapshot-${dno}-${day}" "bronze-${dno}-${day}.tar.gz" --clobber
+            else
+              echo "$dno: no dataset republished since ${prev}: snapshot not stored."
+            fi
+          done
 
       - name: Full test suite
         run: uv run pytest -q

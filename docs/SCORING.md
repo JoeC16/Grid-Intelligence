@@ -58,22 +58,56 @@ Notes on the formulas:
 
 Stored as `site_scores.score` and `site_scores.rank`.
 
-### One national ranking across network operators
+### One ranking per country
 
-When more than one DNO is loaded, percentiles are taken across **every
-scorable primary from every DNO together**, not per DNO. A score of 90 means
-"more stuck than 90% of the primaries covered", wherever they are, so a
-Glasgow primary and a London primary can be compared directly. Filtering the
-map to one network only hides rows; it doesn't re-rank. (`pipeline/run.py`
-scores the combined table; the browser re-scores the same way.)
+Percentiles and ranks are taken **within each country**, across every DNO in
+it: all GB primaries together, all Spanish busbars together. A score of 90
+means "more stuck than 90% of the sites in the same country". Filtering the map
+to one network or distributor only hides rows; it doesn't re-rank.
+(`pipeline/score.py` scores each country's rows separately; the web app shows
+one country at a time, so its live re-scoring matches.)
 
-The caveat: the signals have to mean the same thing at each DNO. The DNOs
-publish the same standard heatmap fields (firm capacity, published headroom,
-offers made and accepted), but the queue and 2030 headroom come from each
-DNO's own LTDS and DFES/NSHR datasets, and their DFES scenarios have different
-names. Each adapter's notes in docs/PROFILE.md say how its fields were mapped,
-and any signal a DNO doesn't publish is left missing (weights re-normalised, as
-above) rather than filled in.
+Why not one GB + Spain ranking: the inputs mean different things. Spain
+publishes firm demand *access* capacity per busbar under CNMC rules, a queue of
+requests admitted but not yet evaluated, and no peak demand, forecasts or
+connection counts; GB publishes headroom from the LTDS heatmap, offers made and
+accepted, peak demand and DFES forecasts. Ranking them together would compare
+unlike with unlike. Don't compare a Spanish score with a British one.
+
+Within GB, several DNOs (once added) share one ranking. The DNOs publish the
+same standard heatmap fields, but the queue and 2030 headroom come from each
+DNO's own datasets; any signal a DNO doesn't publish is left missing (weights
+re-normalised, as above) rather than filled in.
+
+### Spain (CNMC capacity maps)
+
+Each site is a busbar (substation × voltage) as published in the CNMC's demand
+capacity map. How the signals are filled:
+
+| Signal | Spain |
+|---|---|
+| Stuck demand | requests admitted and not evaluated − published headroom (firm demand access capacity available), floored at 0 |
+| Oversubscription | requests waiting / max(published headroom, 1) |
+| Headroom tightness | published headroom |
+| Utilisation | capacity taken (ocupada) / (taken + published headroom); missing where both are 0 |
+| Recent activity | not published: left out, weights re-normalised |
+| Future squeeze | not published: left out, weights re-normalised |
+
+What this means in practice:
+- **86.8% of busbars have zero published headroom** (October 2026). Ties take
+  the lowest percentile, so headroom tightness can't separate them: the score
+  separates Spanish busbars mainly on stuck demand, oversubscription and
+  utilisation. That is the honest reading of the data: most of the grid shows
+  zero, and what differs is how much demand is waiting.
+- Busbars the operator flags **"Nudo 0"** (408) are shown but not scored: the
+  CNMC data doesn't define the flag, and every flagged busbar shows zero
+  capacity, so treating it as "full" could be wrong. Two busbars with a
+  published location outside Spain aren't scored either.
+- The CNMC notes capacities at neighbouring nodes affect each other, so sums
+  over busbars (per distributor, per area) are indicative, not additive.
+- **Distributor view** (`gold.operator_mart`): one row per distribution network
+  operator with busbars published, share at zero published headroom, MW
+  available, MW waiting, MW stuck, MW taken and its most stuck busbar.
 
 ### Known limitation: big boards still rank mid-table
 

@@ -3,12 +3,16 @@
 import pandas as pd
 import pytest
 
-from pipeline.adapters.base import DNOAdapter, Source
+from pipeline.adapters.base import DNOAdapter, DNOInfo, Source
 from pipeline.normalise import build_all, build_sites, headroom_by_scenario, scenario_slug
 
 
 class FakeAdapter(DNOAdapter):
     dno = "FAKE"
+    info = DNOInfo(code="FAKE", name="Fake Networks", region="Testshire", licence_areas=("AAA", "BBB"),
+                   portal_name="Fake portal", portal_url="https://example.org/", licence="CC BY 4.0",
+                   licence_url="https://creativecommons.org/licenses/by/4.0/", map_center=(0.0, 51.5),
+                   map_zoom=8.0, min_sites=1, fallback_id_prefix="FAKE-")
     default_scenario = "Holistic Transition"
 
     def __init__(self, sites=None):

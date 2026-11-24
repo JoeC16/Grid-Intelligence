@@ -23,7 +23,6 @@ import pandas as pd
 from . import bronze
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "grid.duckdb"
-UK_BOX = {"lat": (49.5, 56.5), "lon": (-6.5, 2.5)}  # covers every DNO in Great Britain's south and east
 ROW_CHANGE_LIMIT = 0.20  # a dataset may grow or shrink by up to 20% between snapshots
 
 
@@ -47,22 +46,24 @@ def check_dno(dno: dict, s: pd.DataFrame, b: pd.DataFrame, fs: pd.DataFrame) -> 
     add("sites present", len(s) >= dno["min_sites"], f"{len(s)} sites (expect ≥ {dno['min_sites']})")
     matched_id = _share((~s["site_id"].str.startswith(dno["fallback_id_prefix"])).sum(), len(s))
     add("sites matched to a stable ID", matched_id >= 0.99, f"{matched_id:.1%} (expect ≥ 99%)")
-    in_box = s["lat"].between(*UK_BOX["lat"]) & s["lon"].between(*UK_BOX["lon"])
-    add("locations present and in Great Britain", _share(in_box.sum(), len(s)) >= 0.99, f"{_share(in_box.sum(), len(s)):.1%} (expect ≥ 99%)")
-    scorable = s["scorable"].sum()
-    add("scorable sites", _share(scorable, len(s)) >= 0.98, f"{scorable} of {len(s)} (expect ≥ 98%)")
-    add("GSP mapped", _share(s["gsp_mapped"].sum(), len(s)) >= 0.98, f"{_share(s['gsp_mapped'].sum(), len(s)):.1%} (expect ≥ 98%)")
+    in_box = s["lat"].between(dno["lat_min"], dno["lat_max"]) & s["lon"].between(dno["lon_min"], dno["lon_max"])
+    add("locations present and in its area", _share(in_box.sum(), len(s)) >= 0.99, f"{_share(in_box.sum(), len(s)):.1%} (expect ≥ 99%)")
+    scorable, need = s["scorable"].sum(), dno["min_scorable_share"]
+    add("scorable sites", _share(scorable, len(s)) >= need, f"{scorable} of {len(s)} (expect ≥ {need:.0%})")
+    if dno["has_topology"]:
+        add("GSP mapped", _share(s["gsp_mapped"].sum(), len(s)) >= 0.98, f"{_share(s['gsp_mapped'].sum(), len(s)):.1%} (expect ≥ 98%)")
     head = s.loc[s["scorable"], "demand_headroom_mw"]
     add("published headroom filled", _share(head.notna().sum(), len(head)) >= 0.99, f"{_share(head.notna().sum(), len(head)):.1%} of scorable sites")
     q = s.loc[s["scorable"], "queue_mw"]
     add("queue filled and non-negative", q.notna().all() and (q >= 0).all(), "queue_mw present and ≥ 0 for every scorable site")
 
-    matched = _share(b["matched"].sum(), len(b))
-    add("BSPs matched to published headroom", matched >= 0.90, f"{b['matched'].sum()} of {len(b)} = {matched:.1%} (expect ≥ 90%)")
-    sc_sites = s[s["scorable"]]
-    path = sc_sites["bsp_id"].isna() | sc_sites["bsp_headroom_mw"].notna()
-    add("scorable sites with a known upstream path", _share(path.sum(), len(sc_sites)) >= 0.95,
-        f"{_share(path.sum(), len(sc_sites)):.1%} (direct-fed or BSP headroom published; expect ≥ 95%)")
+    if dno["has_topology"]:
+        matched = _share(b["matched"].sum(), len(b))
+        add("BSPs matched to published headroom", matched >= 0.90, f"{b['matched'].sum()} of {len(b)} = {matched:.1%} (expect ≥ 90%)")
+        sc_sites = s[s["scorable"]]
+        path = sc_sites["bsp_id"].isna() | sc_sites["bsp_headroom_mw"].notna()
+        add("scorable sites with a known upstream path", _share(path.sum(), len(sc_sites)) >= 0.95,
+            f"{_share(path.sum(), len(sc_sites)):.1%} (direct-fed or BSP headroom published; expect ≥ 95%)")
 
     dates_ok = fs["publish_date"].astype(str).str.match(r"^\d{4}-\d{2}-\d{2}$")
     future = pd.to_datetime(fs["publish_date"], errors="coerce") > pd.Timestamp(date.today())

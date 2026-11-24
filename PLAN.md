@@ -170,11 +170,13 @@ What the data supports (checked 2026-11-24):
 - **Not available:** no GSP/BSP-style tree (transmission ↔ distribution link must be inferred or left out), no DFES-style forecast, no connection counts. Values are indicative and, per the CNMC, not additive across nodes.
 
 Plan:
-- [ ] Confirm the reuse licence/terms for the CNMC maps and record it in README (attribution "Fuente: CNMC"). Stop if reuse isn't allowed.
-- [ ] `adapters/cnmc_es.py` (a DNOAdapter for "Spain, all distributors"): bronze snapshot of both layers per month; site = substation busbar; published headroom = available firm demand capacity; queue = admitted not evaluated; utilisation = occupied / (occupied + available); signals Spain doesn't publish left missing. Licence areas = distributors.
-- [ ] Separate scoring for Spain: percentiles within Spain only (different rules and units from GB; a national GB+ES ranking would mislead). Documented in docs/SCORING.md.
-- [ ] **Distributor view** (the Fuse question: which networks to buy or expand): one row per distributor — busbars, share with zero capacity, MW queued, MW available, MW stuck — sortable, each figure linked to the CNMC layer and period.
-- [ ] Map: a GB/Spain switch; same colours, panels and sources; Spanish place names kept as published; UI text says "published capacity (CNMC)", never "available capacity" for a site.
-- [ ] Story chapter set for Spain built from the data (no hand-typed numbers); Ask box tools scoped per country.
-- [ ] Checks for Spain (row counts vs last month, coordinates in Spain, every distributor described); monthly refresh in the workflow.
+- [x] Confirm the reuse licence/terms for the CNMC maps and record it in README (attribution "Fuente: CNMC"). Stop if reuse isn't allowed.
+- [x] `adapters/cnmc_es.py` (a DNOAdapter for "Spain, all distributors"): bronze snapshot of both layers per month; site = substation busbar; published headroom = available firm demand capacity; queue = admitted not evaluated; utilisation = occupied / (occupied + available); signals Spain doesn't publish left missing. Licence areas = distributors.
+- [x] Separate scoring for Spain: percentiles within Spain only (different rules and units from GB; a national GB+ES ranking would mislead). Documented in docs/SCORING.md.
+- [x] **Distributor view** (the Fuse question: which networks to buy or expand): one row per distributor — busbars, share with zero capacity, MW queued, MW available, MW stuck — sortable, each figure linked to the CNMC layer and period.
+- [x] Map: a GB/Spain switch; same colours, panels and sources; Spanish place names kept as published; UI text says "published capacity (CNMC)", never "available capacity" for a site.
+- [x] Story chapter set for Spain built from the data (no hand-typed numbers); Ask box tools scoped per country.
+- [x] Checks for Spain (row counts vs last month, coordinates in Spain, every distributor described); monthly refresh in the workflow.
 - Done when: Spain shows on the map with scores, a distributor ranking and sources, and its checks pass.
+- Phase 13 done (2026-11-24): `adapters/cnmc_es.py` reads the CNMC demand layers (6,182 busbars, 59 distributors, October 2026); licence CC BY-SA 4.0 per CNMC|Data terms (recorded in README, flagged for legal review); scores and ranks per country; "Nudo 0" busbars (408, undefined in the data) shown but not scored; utilisation = taken / (taken + published headroom); `gold.operator_mart` + `/operators` + Distributors panel (sortable, CSV); Country switch, Spain filters (distributors, voltage bands), Spain side panel; six Spain story chapters incl. "Around La Barona" (config/story.yaml); Ask box: country filter, Spanish municipality lookup, Spain prompt; checks per DNO (bbox, scorable share, topology checks only where published); refresh stores a bronze archive per DNO. Transmission (Red Eléctrica) layer kept in bronze, not shown yet.
+

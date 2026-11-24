@@ -97,6 +97,12 @@ def add_derived(sites: pd.DataFrame) -> pd.DataFrame:
     queue, headroom = df["queue_mw"], df["demand_headroom_mw"]
     firm = df["firm_capacity_mw"].where(df["firm_capacity_mw"] > 0)
     df["utilisation"] = df["observed_peak_mw"] / firm
+    # Where a DNO publishes capacity already taken instead of peak demand (Spain):
+    # the share of firm access capacity taken = taken / (taken + published headroom).
+    if "capacity_taken_mw" in df:
+        taken = df["capacity_taken_mw"]
+        total = (taken + headroom.clip(lower=0)).where(lambda t: t > 0)
+        df["utilisation"] = df["utilisation"].fillna(taken / total)
     # MW of queued demand that published headroom can't absorb.
     df["stuck_mw"] = (queue - headroom).clip(lower=0)
     # Queue relative to headroom; headroom floored at 1 MW so tiny or negative
@@ -152,7 +158,19 @@ def stuck_rank(df: pd.DataFrame) -> pd.Series:
 
 
 def score(sites: pd.DataFrame, signals: list[Signal], views: list[View]) -> pd.DataFrame:
-    """site_id, score/rank per view, pct_<signal>, raw signal values, score_missing."""
+    """site_id, score/rank per view, pct_<signal>, raw signal values, score_missing.
+
+    Sites are percentile-ranked and ranked within their country (GB, ES): the rules
+    and data behind the signals differ between countries (docs/SCORING.md).
+    """
+    if "country" in sites and sites["country"].nunique() > 1:
+        parts = [score_one(g, signals, views) for _, g in sites.groupby("country", sort=True)]
+        return pd.concat(parts, ignore_index=True).sort_values(["rank", "site_id"]).reset_index(drop=True)
+    return score_one(sites, signals, views)
+
+
+def score_one(sites: pd.DataFrame, signals: list[Signal], views: list[View]) -> pd.DataFrame:
+    """Score one country's sites."""
     df = add_derived(sites)
     df = df[df["scorable"]].copy()
 

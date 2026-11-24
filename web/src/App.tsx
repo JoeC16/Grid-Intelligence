@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { networkNames, fetchBsps, fetchGsps, fetchMeta, fetchNetwork, fetchSite, fetchSites, fetchStory, type BspRow, type GspRow, type StoryChapter, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON } from "./api";
+import { monthLabel, networkNames, fetchBsps, fetchGsps, fetchMeta, fetchNetwork, fetchOperators, fetchSite, fetchSites, fetchStory, type OperatorRow, type BspRow, type GspRow, type StoryChapter, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON, type Source } from "./api";
 import AskPanel from "./AskPanel";
 import { gradientCss, rampFor, scoreColor, UNSCORED, type Ramp } from "./colors";
 import { LoadInput, Segmented, WeightsPanel } from "./Controls";
@@ -10,12 +10,13 @@ import RankList from "./RankList";
 import BspList from "./BspList";
 import GspCard from "./GspCard";
 import StoryPanel from "./StoryPanel";
+import OperatorList from "./OperatorList";
 import { colourPosition, describe, rankByScore, rankBySiteBsp, rankByStuck, rankForLoad, type Mode, type Ranking } from "./ranking";
 import type { Weights } from "./scoring";
 import SidePanel, { type Headline } from "./SidePanel";
 
 const INITIAL_FILTERS: Filters = { licenceAreas: [], voltages: [], minScore: 0 };
-type Panel = "none" | "ranking" | "weights" | "ask" | "story";
+type Panel = "none" | "ranking" | "weights" | "ask" | "story" | "operators";
 
 const mw = (v: number | null | undefined) =>
   v == null ? "—" : v.toLocaleString("en-GB", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
@@ -76,7 +77,13 @@ export default function App() {
   const [networkData, setNetworkData] = useState<GeoJSON.FeatureCollection | null>(null);
   const [gspRows, setGspRows] = useState<GspRow[]>([]);
   const [selectedGsp, setSelectedGsp] = useState<string | null>(null);
-  const [story, setStory] = useState<StoryChapter[] | null>(null);
+  // Phase 13: one country at a time (GB, ES); everything is ranked within the country shown.
+  const [country, setCountry] = useState("GB");
+  const [stories, setStories] = useState<Record<string, StoryChapter[]>>({});
+  const story = stories[country] ?? null;
+  const [operators, setOperators] = useState<Record<string, { rows: OperatorRow[]; source: Source | null; note: string }>>({});
+  const [operatorsError, setOperatorsError] = useState<string | null>(null);
+  const [selectedOperator, setSelectedOperator] = useState<string | null>(null);
   const [storyIndex, setStoryIndex] = useState(0);
   const [storyError, setStoryError] = useState<string | null>(null);
   const [storyHighlight, setStoryHighlight] = useState<string[]>([]);
@@ -110,7 +117,38 @@ export default function App() {
   const mode: Mode = viewKey === "developer" ? "developer" : investorSort;
   const ramp = rampFor(viewKey);
 
-  const props = useMemo(() => allSites?.features.map((f) => f.properties) ?? [], [allSites]);
+  const countryInfo = meta?.countries?.find((c) => c.code === country) ?? null;
+  const hasTopology = countryInfo?.has_topology ?? true;
+  const countryDnos = useMemo(() => (meta?.dnos ?? []).filter((d) => (d.country ?? "GB") === country), [meta, country]);
+  const siteWord = hasTopology ? "primaries" : "busbars";
+  // Only the country shown takes part in rankings, colours and lists.
+  const props = useMemo(
+    () => allSites?.features.map((f) => f.properties).filter((p) => (p.country ?? "GB") === country) ?? [],
+    [allSites, country],
+  );
+  const hasOperators = useMemo(() => new Set(props.map((p) => p.operator)).size > 1, [props]);
+  const operatorIds = useMemo(
+    () => (selectedOperator ? props.filter((p) => p.operator === selectedOperator).map((p) => p.site_id) : []),
+    [props, selectedOperator],
+  );
+
+  const switchCountry = (code: string) => {
+    if (code === country) return;
+    const c = meta?.countries?.find((x) => x.code === code);
+    setCountry(code);
+    setFilters(INITIAL_FILTERS);
+    setSelectedId(null);
+    setSelectedGsp(null);
+    setSelectedOperator(null);
+    setStoryIndex(0);
+    setStoryHighlight([]);
+    if (c && !c.has_topology) {
+      setShowNetwork(false);
+      if (investorSort === "bsp") setInvestorSort("score");
+    }
+    if (panel === "operators" && code === "GB") setPanel("ranking");
+    if (c) setFlyTo({ center: c.map_center, zoom: c.map_zoom, key: Date.now() });
+  };
   const byId = useMemo(() => new Map<string, SiteProps>(props.map((p) => [p.site_id, p])), [props]);
 
   // Investor score is always computed: it's shown as context in every mode.
@@ -169,11 +207,23 @@ export default function App() {
     fetchGsps().then((d) => setGspRows(d.gsps)).catch((e) => setError(String(e)));
   }, [showNetwork, selectedGsp, networkData]);
 
-  // Load the story when its panel first opens.
+  // Load a country's story when its panel first opens.
   useEffect(() => {
     if (panel !== "story" || story) return;
-    fetchStory().then((d) => setStory(d.chapters)).catch((e) => setStoryError(String(e)));
-  }, [panel, story]);
+    setStoryError(null);
+    fetchStory(country)
+      .then((d) => setStories((s) => ({ ...s, [country]: d.chapters })))
+      .catch((e) => setStoryError(String(e)));
+  }, [panel, story, country]);
+
+  // Load a country's distributors when that panel first opens.
+  useEffect(() => {
+    if (panel !== "operators" || operators[country]) return;
+    setOperatorsError(null);
+    fetchOperators(country)
+      .then((d) => setOperators((o) => ({ ...o, [country]: { rows: d.operators, source: Object.values(d.sources)[0] ?? null, note: d.note } })))
+      .catch((e) => setOperatorsError(String(e)));
+  }, [panel, operators, country]);
 
   // Apply a chapter's focus: view, ranking, network, selection, rings, camera.
   useEffect(() => {
@@ -186,6 +236,7 @@ export default function App() {
     setSelectedGsp(null);
     setSelectedId(f.select ?? null);
     setStoryHighlight(f.highlight ?? []);
+    setFilters({ ...INITIAL_FILTERS, licenceAreas: f.areas ?? [] });
     setFlyTo({ center: f.center, zoom: f.zoom, key: Date.now() });
   }, [panel, story, storyIndex]);
 
@@ -221,7 +272,7 @@ export default function App() {
         big: sc ? sc.value.toFixed(1) : "—",
         color,
         label: investor.score_label ?? investor.label,
-        sub: sc ? `Rank ${sc.rank} of ${scoreRanking!.n} primaries` : "No score",
+        sub: sc ? `Rank ${sc.rank} of ${scoreRanking!.n} ${siteWord} in ${countryInfo?.name ?? "this country"}` : "No score",
         secondary: st ? `Stuck demand ${mw(st.value)} MW (rank ${st.rank} of ${stuckRanking.n})` : "No stuck demand",
       };
     }
@@ -269,7 +320,7 @@ export default function App() {
       secondary: scoreText,
       sources: devSources,
     };
-  }, [selectedId, byId, ranking, ramp, investor, scoreRanking, stuckRanking, loadRanking, bspRanking, loadMw, upstreamOn, mode, detail]);
+  }, [selectedId, byId, ranking, ramp, investor, scoreRanking, stuckRanking, loadRanking, bspRanking, loadMw, upstreamOn, mode, detail, siteWord, countryInfo]);
 
   // The selected site's upstream path, drawn on the map.
   const topology = useMemo<GeoJSON.FeatureCollection | null>(() => {
@@ -322,8 +373,20 @@ export default function App() {
       <header className="z-20 flex print:hidden flex-wrap items-center gap-x-6 gap-y-2 border-b border-stone-200 bg-white px-4 py-2.5">
         <div>
           <h1 className="text-sm font-semibold">Grid Intelligence</h1>
-          <p className="text-[11px] text-stone-500">{networkNames(meta?.dnos, "Distribution network")} primary substations</p>
+          <p className="text-[11px] text-stone-500">
+            {hasTopology
+              ? `${networkNames(countryDnos, "Distribution network")} primary substations`
+              : `${countryInfo?.name ?? ""}: distribution busbars, every distributor (CNMC${countryInfo?.data_period ? `, ${monthLabel(countryInfo.data_period)}` : ""})`}
+          </p>
         </div>
+        {meta && (meta.countries?.length ?? 0) > 1 && (
+          <Segmented
+            label="Country"
+            value={country}
+            onChange={switchCountry}
+            options={meta.countries.map((c) => ({ key: c.code, label: c.name, title: `${c.site_count.toLocaleString("en-GB")} sites, ranked within ${c.name}` }))}
+          />
+        )}
         {meta && investor && developer && (
           <div className="flex flex-wrap items-center gap-2">
             <Segmented
@@ -343,17 +406,17 @@ export default function App() {
                 options={[
                   { key: "score", label: "Score" },
                   { key: "stuck", label: "Most stuck MW", title: "Queued demand beyond published headroom" },
-                  { key: "bsp", label: "BSPs", title: "Bulk supply points by stuck MW" },
+                  ...(hasTopology ? [{ key: "bsp", label: "BSPs", title: "Bulk supply points by stuck MW" }] : []),
                 ]}
               />
             )}
             {viewKey === "developer" && (
               <>
                 <LoadInput value={loadMw} onChange={setLoadMw} />
-                <label className="flex items-center gap-1.5 text-xs text-stone-600" title="Use the lower of the site's and its bulk supply point's headroom after queue">
+                {hasTopology && <label className="flex items-center gap-1.5 text-xs text-stone-600" title="Use the lower of the site's and its bulk supply point's headroom after queue">
                   <input type="checkbox" checked={upstreamOn} onChange={(e) => setUpstreamOn(e.target.checked)} className="accent-stone-900" />
                   Count BSP limits
-                </label>
+                </label>}
               </>
             )}
             <span className="sm:hidden">
@@ -364,9 +427,16 @@ export default function App() {
             <ToolbarButton active={panel === "story"} onClick={() => togglePanel("story")}>
               Story
             </ToolbarButton>
-            <ToolbarButton active={showNetwork} onClick={() => setShowNetwork((v) => !v)}>
-              Network
-            </ToolbarButton>
+            {hasTopology && (
+              <ToolbarButton active={showNetwork} onClick={() => setShowNetwork((v) => !v)}>
+                Network
+              </ToolbarButton>
+            )}
+            {hasOperators && (
+              <ToolbarButton active={panel === "operators"} onClick={() => togglePanel("operators")}>
+                Distributors
+              </ToolbarButton>
+            )}
             <ToolbarButton active={panel === "ask"} onClick={() => togglePanel("ask")}>
               Ask
             </ToolbarButton>
@@ -381,7 +451,7 @@ export default function App() {
           </div>
         )}
         <div className={`${showFilters ? "flex" : "hidden"} w-full sm:flex sm:w-auto`}>
-          <FilterBar meta={meta} filters={filters} onChange={setFilters} shown={visible?.size ?? null} showMinScore={mode === "score"} />
+          <FilterBar meta={meta} country={countryInfo} dnos={countryDnos} filters={filters} onChange={setFilters} shown={visible?.size ?? null} showMinScore={mode === "score"} />
         </div>
       </header>
 
@@ -392,7 +462,7 @@ export default function App() {
           display={display}
           visible={visible}
           selectedId={selectedId}
-          highlightIds={panel === "ask" ? askIds : panel === "story" ? storyHighlight : []}
+          highlightIds={panel === "ask" ? askIds : panel === "story" ? storyHighlight : panel === "operators" ? operatorIds : []}
           topology={topology}
           network={showNetwork ? networkData : null}
           flyTo={flyTo}
@@ -401,7 +471,7 @@ export default function App() {
             setSelectedGsp(g);
           }}
           onSelect={setSelectedId}
-          dnos={meta?.dnos}
+          dnos={countryDnos}
         />
         </div>
 
@@ -434,7 +504,7 @@ export default function App() {
                 `Filters: areas ${filters.licenceAreas.join("/") || "all"}; voltages ${filters.voltages.join("/") || "all"}`,
                 `Sources: ${[...new Map((meta?.sources ?? []).map((s) => [s.dataset_id, `${s.dataset_id} (${s.publish_date}, ${s.licence})`])).values()].join("; ")}`,
                 meta?.disclaimer ?? "Published headroom is indicative and not guaranteed.",
-                "Not a connection offer. Ranks are across every network covered; filters only hide rows.",
+                `Not a connection offer. Ranks are within ${countryInfo?.name ?? "the country shown"}; filters only hide rows.`,
               ]}
               key={mode}
               title={listTitle}
@@ -451,6 +521,31 @@ export default function App() {
         {panel === "story" && (
           <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36 print:hidden">
             <StoryPanel chapters={story} index={storyIndex} onIndex={setStoryIndex} error={storyError} onClose={() => setPanel("none")} />
+          </div>
+        )}
+        {panel === "operators" && (
+          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36 print:hidden">
+            <OperatorList
+              operators={operators[country]?.rows ?? null}
+              source={operators[country]?.source ?? null}
+              note={operators[country]?.note ?? ""}
+              period={monthLabel(countryInfo?.data_period) || "latest"}
+              selectedOperator={selectedOperator}
+              error={operatorsError}
+              onSelect={(o) => {
+                setSelectedOperator(o.operator);
+                setSelectedId(o.top_site_id);
+                const f = allSites?.features.filter((x) => x.properties.operator === o.operator) ?? [];
+                if (f.length) {
+                  const lons = f.map((x) => x.geometry.coordinates[0]);
+                  const lats = f.map((x) => x.geometry.coordinates[1]);
+                  const span = Math.max(Math.max(...lons) - Math.min(...lons), Math.max(...lats) - Math.min(...lats));
+                  const zoom = span > 6 ? 5.3 : span > 2 ? 6.5 : span > 0.5 ? 8 : 9.5;
+                  setFlyTo({ center: [(Math.max(...lons) + Math.min(...lons)) / 2, (Math.max(...lats) + Math.min(...lats)) / 2], zoom, key: Date.now() });
+                }
+              }}
+              onClose={() => setPanel("none")}
+            />
           </div>
         )}
         {panel === "ask" && (
@@ -496,7 +591,7 @@ export default function App() {
               loading={detailLoading}
               error={error}
               onClose={() => setSelectedId(null)}
-              dnos={meta?.dnos}
+              dnos={countryDnos}
             />
           </div>
         )}

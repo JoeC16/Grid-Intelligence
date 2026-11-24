@@ -39,8 +39,9 @@ All of it lives in `data/` (never committed). Code: [`pipeline/bronze.py`](../pi
 
 A refresh writes a new dated folder; earlier snapshots are kept. Adapters read
 the latest snapshot unless asked for another (`adapter.for_snapshot(date)`).
-Snapshots so far: 2026-11-17 and 2026-11-23. No dataset was republished between
-them (same publish dates and row counts), so nothing moved.
+UKPN snapshots so far: 2026-11-17 and 2026-11-23 (no dataset republished between
+them). Spain (`data/bronze/es/`): first snapshot 2026-11-24, CNMC data period
+October 2026; the CNMC updates its maps monthly.
 
 ## Silver
 
@@ -77,7 +78,8 @@ snapshot); `gold.*` are marts built on them.
 | `gold.gsp_mart` | GSP level: queue, **stuck MW** (its BSPs' stuck MW + directly fed primaries'), sites limited upstream, sites running out by 2030, earliest runs-out year, large demand, import utilisation |
 | `gold.headroom_timeline` | Per scenario and forecast year: primaries below zero, total published headroom |
 | `gold.large_demand_by_year` | Large demand projects and MVA per GSP, technology and application year |
-| `gold.changes` | Latest vs previous snapshot: every measure that moved, per site and BSP (empty until a dataset is republished) |
+| `gold.changes` | Latest vs previous snapshot, per DNO: every measure that moved, per site and BSP (empty until a dataset is republished) |
+| `gold.operator_mart` | One row per distribution network operator (Spain: every distributor in the CNMC data; GB: the DNO): busbars/sites, share at zero published headroom, MW published headroom, MW waiting, MW stuck, MW taken, most stuck site, rank by stuck MW within the country |
 
 Definitions:
 - **Runs-out year**: the first DFES forecast year, from the snapshot's year on, in which a primary's published headroom (default scenario) is below zero. Empty = stays at or above zero to 2050.

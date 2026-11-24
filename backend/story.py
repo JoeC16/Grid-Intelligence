@@ -7,9 +7,13 @@ and a map focus the web app applies when the chapter opens.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
+import yaml
 
 from backend.assistant import _num
 
@@ -243,3 +247,195 @@ def build_story(data: dict[str, pd.DataFrame], source: callable, dnos: list[dict
         for f in c["facts"]:
             f["value"] = _num(f["value"]) if isinstance(f["value"], float) else f["value"]
     return {"chapters": chapters, "snapshots": snapshot_dates, "scenario": scenario}
+
+
+# ------------------------------------------------------------------ Spain --
+
+STORY_CONFIG = Path(__file__).resolve().parent.parent / "config" / "story.yaml"
+
+
+def _km(lat0: float, lon0: float, lat: pd.Series, lon: pd.Series) -> pd.Series:
+    """Great-circle distance in km."""
+    p0, p = np.radians(lat0), np.radians(lat)
+    a = np.sin((p - p0) / 2) ** 2 + np.cos(p0) * np.cos(p) * np.sin(np.radians(lon - lon0) / 2) ** 2
+    return 6371 * 2 * np.arcsin(np.sqrt(a))
+
+
+def _month(period: str | None) -> str | None:
+    """'2026-10' -> 'October 2026'."""
+    try:
+        return pd.Timestamp(f"{period}-01").strftime("%B %Y")
+    except (ValueError, TypeError):
+        return None
+
+
+def _pct(n: float, d: float) -> str:
+    return f"{_num(100 * n / d):.1f}%" if d else "—"
+
+
+def build_story_es(data: dict[str, pd.DataFrame], source: callable, dno: dict) -> dict[str, Any]:
+    """Spain chapters, from the CNMC busbar data and the operator mart. Same shape as build_story."""
+    sites, sc, ops = data["sites"], data["site_scores"], data["gold_operator_mart"]
+    code = dno["code"]
+    period = _month(dno.get("data_period")) or dno.get("snapshot_date")
+    view = {"center": dno["map_center"], "zoom": dno["map_zoom"]}
+    cfg = (yaml.safe_load(STORY_CONFIG.read_text()) or {}).get("ES", {}) if STORY_CONFIG.exists() else {}
+
+    def src(*fields: str) -> list[dict]:
+        out = []
+        for f in fields:
+            x = source(code, f)
+            if x and x not in out:
+                out.append(x)
+        return out
+
+    chapters: list[dict[str, Any]] = []
+    n = len(sites)
+    zero = int((sites["demand_headroom_mw"] <= 0).sum())
+    flagged = int(sites["exclude_reason"].fillna("").str.contains("Nudo 0").sum())
+    operators = sites["operator"].nunique()
+
+    # 1. Full ------------------------------------------------------------------
+    chapters.append({
+        "id": "es_full",
+        "title": "Spain's distribution grid is full",
+        "body": (
+            f"The CNMC's demand capacity map ({period}) covers **{_n(n)}** substation busbars above 1 kV from "
+            f"**{_n(operators)}** distribution network operators. **{_n(zero)}** of them ({_pct(zero, n)}) show **zero** "
+            f"firm demand capacity left: a new demand connection there can't be given firm access as published. "
+            f"{_n(flagged)} busbars carry an operator flag (\"Nudo 0\") the data doesn't define and aren't scored. "
+            "Map: busbars by stuck-demand score, ranked within Spain."
+        ),
+        "facts": [
+            {"label": "Busbars published", "value": n, "unit": "busbars"},
+            {"label": "With zero published headroom", "value": zero, "unit": "busbars"},
+            {"label": "Distribution network operators", "value": operators, "unit": "operators"},
+        ],
+        "sources": src("demand_headroom_mw"),
+        "focus": {"view": "investor", "sort": "score", "network": False, **view},
+    })
+
+    # 2. Waiting -------------------------------------------------------------
+    stuck = sc[sc["site_id"].isin(sites["site_id"]) & (sc["stuck_mw"] > 0)]
+    queue = sites["queue_mw"].sum()
+    chapters.append({
+        "id": "es_queue",
+        "title": "Demand is waiting",
+        "body": (
+            f"Requests admitted but not yet evaluated add up to **{_mw(queue)} MW** across Spain's distribution busbars. "
+            f"At **{_n(len(stuck))}** busbars the requests waiting are bigger than the published headroom: "
+            f"**{_mw(stuck['stuck_mw'].sum())} MW** of demand the network can't take as published. "
+            "The CNMC notes that capacities at neighbouring nodes affect each other, so totals are indicative. "
+            "Map: busbars ranked by MW stuck."
+        ),
+        "facts": [
+            {"label": "Requests waiting (admitted, not evaluated)", "value": queue, "unit": "MW"},
+            {"label": "Busbars with stuck demand", "value": len(stuck), "unit": "busbars"},
+            {"label": "Stuck at those busbars", "value": stuck["stuck_mw"].sum(), "unit": "MW"},
+        ],
+        "sources": src("queue_mw", "demand_headroom_mw"),
+        "focus": {"view": "investor", "sort": "stuck", "network": False, **view},
+    })
+
+    # 3. Who runs them ---------------------------------------------------------
+    top = ops[ops["stuck_rank"].notna()].sort_values("stuck_rank").head(5)
+    chapters.append({
+        "id": "es_operators",
+        "title": "Which networks are stuck",
+        "body": (
+            "By distribution network operator, most stuck demand first:\n"
+            + "\n".join(f"- **{r.operator_name}**: {_mw(r.stuck_mw)} MW stuck, {_pct(r.sites_zero_headroom, r.sites)} of its "
+                        f"{_n(r.sites)} busbars at zero published headroom; most stuck: {r.top_site_name}"
+                        for r in top.itertuples())
+            + "\n\nOpen Distributors for every operator."
+        ),
+        "facts": [{"label": r.operator_name, "value": r.stuck_mw, "unit": "MW stuck"} for r in top.itertuples()],
+        "sources": src("operator", "queue_mw", "demand_headroom_mw"),
+        "focus": {"view": "investor", "sort": "stuck", "network": False, **view},
+    })
+
+    # 4. Small distributors ------------------------------------------------------
+    big = set(dno["licence_areas"][:-1])  # every area but the last ("Small distributors")
+    small = ops[~ops["licence_area"].isin(big)]
+    small_sites = int(small["sites"].sum())
+    small_zero = int(small["sites_zero_headroom"].sum())
+    stuck_small = small[small["stuck_mw"] > 0].sort_values("stuck_mw", ascending=False)
+    chapters.append({
+        "id": "es_small",
+        "title": "The small distributors",
+        "body": (
+            f"Besides the five large operators, **{_n(len(small))}** small distribution companies publish "
+            f"{_n(small_sites)} busbars; {_n(small_zero)} of them ({_pct(small_zero, small_sites)}) show zero published "
+            f"headroom. **{_n(len(stuck_small))}** have demand waiting beyond their published headroom"
+            + (":\n" + "\n".join(f"- **{r.operator_name}** ({r.provinces}): {_mw(r.stuck_mw)} MW stuck across "
+                                  f"{_n(r.sites)} busbar{'' if r.sites == 1 else 's'}" for r in stuck_small.head(5).itertuples()) if len(stuck_small) else ".")
+        ),
+        "facts": [
+            {"label": "Small distributors", "value": len(small), "unit": "operators"},
+            {"label": "Their busbars at zero headroom", "value": small_zero, "unit": "busbars"},
+        ],
+        "sources": src("operator", "demand_headroom_mw", "queue_mw"),
+        "focus": {"view": "investor", "sort": "stuck", "network": False, "areas": [dno["licence_areas"][-1]], **view},
+    })
+
+    # 5. A worked example --------------------------------------------------------
+    ex = cfg.get("example")
+    here = sites[sites["site_id"].str.startswith(ex["site_prefix"])] if ex else sites.iloc[0:0]
+    if len(here):
+        lat0, lon0 = float(here["lat"].iloc[0]), float(here["lon"].iloc[0])
+        near = sites.assign(km=_km(lat0, lon0, sites["lat"], sites["lon"]))
+        near = near[near["km"] <= ex["radius_km"]]
+        subs = near.assign(sub=near["name"].str.replace(r" [\d.]+ kV.*$", "", regex=True))
+        by_sub = subs.groupby("sub").agg(km=("km", "min"), headroom=("demand_headroom_mw", "sum"),
+                                         taken=("capacity_taken_mw", "sum"), queue=("queue_mw", "sum"))
+        with_room = by_sub[by_sub["headroom"] > 0]
+        own = here.sort_values(["voltage", "name"])
+        sub_name = re.sub(r" [\d.]+ kV.*$", "", own["name"].iloc[0])
+
+        def busbar(r) -> str:
+            label = f"{r.voltage:g} kV" + (f" (busbar {m.group(1)})" if (m := re.search(r"busbar (\d+)", r.name)) else "")
+            if isinstance(r.exclude_reason, str):
+                return f"{label}: flagged by its operator, not scored"
+            return f"{label}: {_mw(r.demand_headroom_mw)} MW published headroom, {_mw(r.capacity_taken_mw)} MW taken"
+
+        chapters.append({
+            "id": "es_example",
+            "title": ex["title"],
+            "body": (
+                f"{ex['place']}: the local substation in the data is **{sub_name}**, run by {own['operator_name'].iloc[0]}.\n"
+                + "\n".join(f"- {busbar(r)}" for r in own.itertuples())
+                + f"\n\nWithin {ex['radius_km']} km there are **{_n(len(by_sub))}** substations; "
+                f"**{_n(len(with_room))}** of them publish any firm demand capacity. "
+                f"Requests waiting within that radius: {_mw(by_sub['queue'].sum())} MW."
+            ),
+            "facts": [
+                {"label": f"Substations within {ex['radius_km']} km", "value": len(by_sub), "unit": "substations"},
+                {"label": "With any published headroom", "value": len(with_room), "unit": "substations"},
+            ],
+            "sources": src("demand_headroom_mw", "capacity_taken_mw", "queue_mw"),
+            "focus": {"view": "investor", "sort": "score", "network": False,
+                      # open the busbar with the most capacity taken among those scored
+                      "select": (own[own["exclude_reason"].isna()].sort_values("capacity_taken_mw").iloc[-1]
+                                 if own["exclude_reason"].isna().any() else own.iloc[-1])["site_id"],
+                      "highlight": near["site_id"].tolist(), "center": [lon0, lat0], "zoom": 9.6},
+        })
+
+    # 6. Next --------------------------------------------------------------------
+    chapters.append({
+        "id": "es_next",
+        "title": "What changes next",
+        "body": (
+            "The CNMC updates its capacity maps every month, and every download is kept as a dated snapshot. "
+            "Month by month, the map will show where capacity frees up, where requests pile up, and which operators "
+            "are adding capacity."
+        ),
+        "facts": [{"label": "Data period", "value": period, "unit": ""}],
+        "sources": src("demand_headroom_mw"),
+        "focus": {"view": "investor", "sort": "score", "network": False, **view},
+    })
+
+    for i, c in enumerate(chapters):
+        c["number"] = i + 1
+        for f in c["facts"]:
+            f["value"] = _num(f["value"]) if isinstance(f["value"], float) else f["value"]
+    return {"chapters": chapters, "snapshots": [dno.get("snapshot_date")], "scenario": None}

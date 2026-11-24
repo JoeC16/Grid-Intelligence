@@ -1,7 +1,11 @@
-import type { Filters, Meta } from "./api";
+import type { CountryInfo, DnoInfo, Filters, Meta } from "./api";
 
 interface Props {
   meta: Meta | null;
+  /** The country shown: its areas and voltages. */
+  country: CountryInfo | null;
+  /** The DNOs in that country. */
+  dnos: DnoInfo[];
   filters: Filters;
   onChange: (f: Filters) => void;
   shown: number | null;
@@ -31,13 +35,23 @@ function Chip({ active, onClick, title, children }: { active: boolean; onClick: 
   );
 }
 
-export default function FilterBar({ meta, filters, onChange, shown, showMinScore }: Props) {
+// With many busbar voltages (Spain publishes 22), filter by band instead of by each voltage.
+// Bands follow the Spanish regulatory split: medium voltage up to 36 kV, high voltage above.
+const MAX_VOLTAGE_CHIPS = 8;
+const BANDS = [
+  { key: "mv", label: "≤ 36 kV", test: (v: number) => v <= 36 },
+  { key: "hv", label: "> 36 kV", test: (v: number) => v > 36 },
+];
+
+export default function FilterBar({ meta, country, dnos, filters, onChange, shown, showMinScore }: Props) {
   if (!meta) return null;
   // Areas grouped by network operator; a network chip (shown once there are several) selects all its areas.
-  const dnos = meta.dnos ?? [];
+  const inCountry = country?.licence_areas ?? meta.licence_areas;
   const owner = new Map(dnos.flatMap((d) => d.licence_areas.map((a) => [a, d.name] as const)));
-  const areas = [...dnos.flatMap((d) => d.licence_areas.filter((a) => meta.licence_areas.includes(a))),
-    ...meta.licence_areas.filter((a) => !owner.has(a))];
+  const areas = [...dnos.flatMap((d) => d.licence_areas.filter((a) => inCountry.includes(a))),
+    ...inCountry.filter((a) => !owner.has(a))];
+  const voltages = country?.voltages ?? meta.voltages;
+  const banded = voltages.length > MAX_VOLTAGE_CHIPS;
   const hasAll = (d: (typeof dnos)[number]) => d.licence_areas.every((a) => filters.licenceAreas.includes(a));
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -75,15 +89,33 @@ export default function FilterBar({ meta, filters, onChange, shown, showMinScore
 
       <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Voltage">
         <span className="mr-1 text-xs text-stone-500">Voltage</span>
-        {meta.voltages.map((v) => (
-          <Chip
-            key={v}
-            active={filters.voltages.includes(v)}
-            onClick={() => onChange({ ...filters, voltages: toggle(filters.voltages, v) })}
-          >
-            {v} kV
-          </Chip>
-        ))}
+        {banded
+          ? BANDS.map((b) => {
+              const vs = voltages.filter(b.test);
+              const on = vs.length > 0 && vs.every((v) => filters.voltages.includes(v));
+              return (
+                <Chip
+                  key={b.key}
+                  active={on}
+                  title={vs.map((v) => `${v} kV`).join(", ")}
+                  onClick={() => {
+                    const rest = filters.voltages.filter((v) => !vs.includes(v));
+                    onChange({ ...filters, voltages: on ? rest : [...rest, ...vs] });
+                  }}
+                >
+                  {b.label}
+                </Chip>
+              );
+            })
+          : voltages.map((v) => (
+              <Chip
+                key={v}
+                active={filters.voltages.includes(v)}
+                onClick={() => onChange({ ...filters, voltages: toggle(filters.voltages, v) })}
+              >
+                {v} kV
+              </Chip>
+            ))}
       </div>
 
 {showMinScore && (
@@ -103,7 +135,7 @@ export default function FilterBar({ meta, filters, onChange, shown, showMinScore
       )}
 
       <span className="text-xs text-stone-500 tabular-nums">
-        {shown ?? "…"} of {meta.site_count} substations
+        {shown?.toLocaleString("en-GB") ?? "…"} of {(country?.site_count ?? meta.site_count).toLocaleString("en-GB")} {country && !country.has_topology ? "busbars" : "substations"}
       </span>
     </div>
   );

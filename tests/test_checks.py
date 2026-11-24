@@ -8,7 +8,8 @@ from pipeline import checks
 
 
 def _dno(code="UKPN", min_sites=900, prefix="UKPN-MRID-"):
-    return {"code": code, "min_sites": min_sites, "fallback_id_prefix": prefix}
+    return {"code": code, "min_sites": min_sites, "fallback_id_prefix": prefix, "lat_min": 49.5, "lat_max": 61.0,
+            "lon_min": -8.7, "lon_max": 2.1, "min_scorable_share": 0.98, "has_topology": True}
 
 
 def _tables(n=1000, dno="UKPN", prefix=""):
@@ -46,7 +47,7 @@ def test_bad_locations_and_scores_fail():
     t = _tables()
     t["sites"].loc[:100, "lat"] = 0.0  # in the sea off Africa
     t["site_scores"].loc[0, "score"] = 140.0
-    assert {"UKPN: locations present and in Great Britain", "scores in 0–100"} <= _failed(t)
+    assert {"UKPN: locations present and in its area", "scores in 0–100"} <= _failed(t)
 
 
 def test_missing_licence_or_future_date_fails():
