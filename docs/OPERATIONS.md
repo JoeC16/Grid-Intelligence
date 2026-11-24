@@ -85,4 +85,5 @@ vercel deploy --prod                 # needs a Vercel login or VERCEL_TOKEN
 
 - The rate limit is per server instance (Vercel can run several), so it is a soft limit; the Anthropic spend limit is the hard one.
 - First request after a quiet spell takes ~6 s (the function loads the data). Later ones take under 0.5 s.
+- Straight after a deploy, the very first request to a newly added endpoint has twice returned "Not Found" (an older instance answering); a retry seconds later works. Check new endpoints twice before calling a deploy broken.
 - Snapshot history only grows when UKPN republishes; between publications the refresh stores nothing new.

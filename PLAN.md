@@ -122,7 +122,7 @@ Tasks:
 - Done when: the network can be shown on the map, the story clicks through end to end with sourced numbers, and the data model is documented.
 - Result: snapshots 2026-11-17 and 2026-11-23 (no UKPN dataset republished between them, so gold.changes is empty until the next publication). Story: 7 chapters built from gold, each with sources and a map focus.
 
-## Phase 11 — Production-ready for a pilot
+## Phase 11 — Production-ready for a pilot ✅
 Make it safe and repeatable to put in front of paying users: nothing open to abuse, data that refreshes and checks itself, a deploy that doesn't depend on one session, and the basics customers expect.
 
 - [x] Ask box protection: off unless an access code is configured (ASK_ACCESS_CODE); code required on every question; per-visitor rate limit; usage logged. Anthropic spend cap set in the Console (owner action).
@@ -132,6 +132,6 @@ Make it safe and repeatable to put in front of paying users: nothing open to abu
 - [x] Exports: ranking as CSV (with the weights used and sources); printable site report (save as PDF).
 - [x] Health endpoint (snapshot date, counts) for uptime monitoring; structured logs for AI questions (tool calls, tokens).
 - [x] Phone layout: side panel as a bottom sheet so the map stays visible.
-- [ ] Merge to main and deploy from main.
+- [x] Merge to main and deploy from main (PR #1; git-triggered Vercel builds switched off so only data-bearing deploys reach production).
 - [x] docs/OPERATIONS.md: secrets, the refresh workflow, how to deploy, roll back, and what to do when a check fails.
 - Done when: the Ask box can't be used without a code, a refresh can run end to end without this session, checks gate the deploy, and the code is on main.
