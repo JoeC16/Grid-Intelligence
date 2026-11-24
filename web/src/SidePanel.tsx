@@ -188,7 +188,7 @@ export default function SidePanel({ site, headline, weights, colocated, onSelect
                 {site.name}
               </h2>
               <p className="mt-0.5 text-xs text-stone-500">
-                {site.licence_area} · {site.voltage} kV · GSP {site.gsp ?? "unmapped"} ·{" "}
+                {site.licence_area} · {site.voltage} kV · {site.country === "ES" ? (site.municipality ?? "") : `GSP ${site.gsp ?? "unmapped"}`} ·{" "}
                 <span className="font-mono">{site.site_id}</span>
               </p>
             </>
@@ -277,11 +277,26 @@ export default function SidePanel({ site, headline, weights, colocated, onSelect
               </div>
             )}
 
-            <UpstreamSection site={site} onSelect={onSelect} />
+            {site.operator_name && site.country !== "GB" && (
+              <div className="mb-2 text-xs text-stone-600">
+                <p>
+                  Distributor: <span className="font-medium text-stone-800">{site.operator_name}</span>
+                  {site.operator ? ` (${site.operator})` : ""}
+                </p>
+                {(site.municipality || site.province) && (
+                  <p>{[site.municipality, site.province].filter(Boolean).join(", ")}</p>
+                )}
+                {site.reserved && <p className="mt-0.5">Node reserved by the operator for regulatory reasons.</p>}
+                <p className="mt-0.5 text-[11px] text-stone-500">
+                  The CNMC data has no upstream tree, forecasts or connection counts for Spain.
+                </p>
+              </div>
+            )}
+            {(site.upstream.bsp || site.upstream.gsp) && <UpstreamSection site={site} onSelect={onSelect} />}
 
             <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">Signals</h3>
             <p className="mt-1 text-[11px] text-stone-500">
-              Bars: how stuck vs every other primary covered (100 = most stuck).
+              Bars: how stuck vs every other site in the same country (100 = most stuck).
             </p>
             <ul className="divide-y divide-stone-100">
               {site.signals.map((s) => (
@@ -291,18 +306,30 @@ export default function SidePanel({ site, headline, weights, colocated, onSelect
 
             <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">Capacity and queue</h3>
             <div className="py-2">
-              <Row label="Demand queue (offered, not connected)" value={site.queue.queue_mw} unit="MW" />
+              <Row
+                label={site.country === "ES" ? "Requests waiting (admitted, not yet evaluated)" : "Demand queue (offered, not connected)"}
+                value={site.queue.queue_mw}
+                unit="MW"
+              />
               {site.queue.note && <p className="text-[11px] text-stone-500">{site.queue.note}</p>}
               <p className="mb-2 text-[11px]">
                 <SourceLink source={site.queue.source} />
               </p>
-              <Row label="Firm capacity" value={site.capacity.firm_capacity_mw} unit="MW" />
-              <Row label="Observed peak (24/25)" value={site.capacity.observed_peak_mw} unit="MW" />
+              {site.capacity.capacity_taken_mw != null ? (
+                <Row label="Capacity already taken (ocupada)" value={site.capacity.capacity_taken_mw} unit="MW" />
+              ) : (
+                <>
+                  <Row label="Firm capacity" value={site.capacity.firm_capacity_mw} unit="MW" />
+                  <Row label="Observed peak (24/25)" value={site.capacity.observed_peak_mw} unit="MW" />
+                </>
+              )}
               <p className="mt-1 text-[11px]">
                 <SourceLink source={site.capacity.source} />
               </p>
             </div>
 
+            {site.headroom_2030.values.length > 0 && (
+              <>
             <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">
               Published headroom 2030 by scenario
             </h3>
@@ -314,6 +341,9 @@ export default function SidePanel({ site, headline, weights, colocated, onSelect
                 <SourceLink source={site.headroom_2030.source} />
               </p>
             </div>
+
+              </>
+            )}
 
             {site.gsp_context && (
               <>

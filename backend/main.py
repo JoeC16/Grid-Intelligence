@@ -29,7 +29,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 
 from backend import assistant, guard
-from backend.story import build_story
+from backend.story import build_story, build_story_es
 from pipeline.score import load_config
 
 load_dotenv()  # local fallback only; in the cloud environment keys come from env vars
@@ -86,8 +86,12 @@ def _load() -> dict[str, pd.DataFrame]:
             "headroom_scenarios": con.execute("SELECT * FROM headroom_scenarios").df(),
             "large_demand": con.execute("SELECT * FROM large_demand").df(),
             **{f"gold_{t}": con.execute(f"SELECT * FROM gold.{t}").df()
-               for t in ("gsp_mart", "bsp_mart", "headroom_timeline", "large_demand_by_year", "changes")},
+               for t in ("gsp_mart", "bsp_mart", "headroom_timeline", "large_demand_by_year", "changes",
+                         "operator_mart")},
             "snapshots": sorted(con.execute("SELECT DISTINCT snapshot_date FROM silver.sites").df()["snapshot_date"]),
+            "snapshots_by_dno": con.execute(
+                "SELECT dno, list(DISTINCT snapshot_date ORDER BY snapshot_date) AS dates FROM silver.sites GROUP BY 1"
+            ).df().set_index("dno")["dates"].map(list).to_dict(),
             "weights": con.execute("SELECT * FROM score_weights").df(),
             "sources": con.execute("SELECT * FROM field_sources").df(),
             "dnos": con.execute("SELECT * FROM dnos").df(),
@@ -95,6 +99,35 @@ def _load() -> dict[str, pd.DataFrame]:
 
 
 PCT_COLS = [f"pct_{k}" for k in SIGNAL_DISPLAY]
+
+
+def _country_data(data: dict, country: str) -> dict:
+    """The same tables, limited to one country's sites, DNOs and marts."""
+    dnos = set(data["dnos"].loc[data["dnos"]["country"] == country, "code"])
+    ids = set(data["sites"].loc[data["sites"]["country"] == country, "site_id"])
+    out = {}
+    for k, v in data.items():
+        if not isinstance(v, pd.DataFrame):
+            out[k] = v
+        elif "country" in v:
+            out[k] = v[v["country"] == country]
+        elif "dno" in v:
+            out[k] = v[v["dno"].isin(dnos)]
+        elif "code" in v and k == "dnos":
+            out[k] = v[v["code"].isin(dnos)]
+        elif "site_id" in v:
+            out[k] = v[v["site_id"].isin(ids)]
+        else:
+            out[k] = v
+    out["snapshots"] = sorted({d for code in dnos for d in data.get("snapshots_by_dno", {}).get(code, [])})
+    return out
+
+
+def _check_country(data: dict, country: str) -> str:
+    country = country.upper()
+    if country not in set(data["dnos"]["country"]):
+        raise HTTPException(status_code=404, detail=f"No data for country {country!r}")
+    return country
 
 
 def _clean(v: Any, digits: int | None = 3) -> Any:
@@ -158,6 +191,34 @@ def _dnos(data: dict) -> list[dict]:
             "licence": r["licence"], "licence_url": r["licence_url"],
             "map_center": [r["map_lon"], r["map_lat"]], "map_zoom": r["map_zoom"],
             "site_count": int((data["sites"]["dno"] == r["code"]).sum()),
+            "country": r.get("country", "GB"), "publisher": r.get("publisher") or r["name"],
+            "has_topology": bool(r.get("has_topology", True)),
+            "data_period": _clean(r.get("data_period")), "snapshot_date": _clean(r.get("snapshot_date")),
+        })
+    return out
+
+
+COUNTRY_NAMES = {"GB": "Great Britain", "ES": "Spain"}
+
+
+def _countries(data: dict) -> list[dict]:
+    """Countries covered, each scored and ranked on its own (docs/SCORING.md)."""
+    sites, dnos = data["sites"], _dnos(data)
+    out = []
+    for code in dict.fromkeys(d["country"] for d in dnos):  # keep pipeline order (GB first)
+        mine = [d for d in dnos if d["country"] == code]
+        s = sites[sites["country"] == code]
+        lons = [d["map_center"][0] for d in mine]
+        lats = [d["map_center"][1] for d in mine]
+        out.append({
+            "code": code, "name": COUNTRY_NAMES.get(code, code), "dnos": [d["code"] for d in mine],
+            "licence_areas": [a for d in mine for a in d["licence_areas"] if a in set(s["licence_area"])],
+            "voltages": sorted(float(v) for v in s["voltage"].dropna().unique()),
+            "site_count": int(len(s)), "scored_count": int(s["score"].notna().sum()),
+            "map_center": [sum(lons) / len(lons), sum(lats) / len(lats)],
+            "map_zoom": min(d["map_zoom"] for d in mine) if len(mine) == 1 else min(d["map_zoom"] for d in mine) - 1,
+            "has_topology": any(d["has_topology"] for d in mine),
+            "data_period": next((d["data_period"] for d in mine if d["data_period"]), None),
         })
     return out
 
@@ -181,6 +242,7 @@ def meta() -> dict:
         "views": [_view_meta(v, stored) for v in views],
         "headroom_2030_scenario": _clean(sites["headroom_2030_scenario"].iloc[0]),
         "dnos": _dnos(data),
+        "countries": _countries(data),
         "sources": [{k: _clean(v) for k, v in r.items()} for r in data["sources"].to_dict("records")],
     }
 
@@ -191,12 +253,15 @@ def list_sites(
     voltage: Annotated[list[float] | None, Query(description="busbar kV, e.g. 11; repeat for several")] = None,
     min_score: Annotated[float | None, Query(ge=0, le=100)] = None,
     gsp: str | None = None,
+    country: Annotated[str | None, Query(description="GB or ES; omit for every country")] = None,
     include_unscored: bool = True,
 ) -> dict:
     """Substations as a GeoJSON FeatureCollection (light properties for the map)."""
     df = _load()["sites"]
+    if country:
+        df = df[df["country"] == _check_country(_load(), country)]
     if licence_area:
-        df = df[df["licence_area"].isin([a.upper() for a in licence_area])]
+        df = df[df["licence_area"].str.upper().isin([a.upper() for a in licence_area])]
     if voltage:
         df = df[df["voltage"].isin(voltage)]
     if gsp:
@@ -206,7 +271,7 @@ def list_sites(
     elif not include_unscored:
         df = df[df["score"].notna()]
 
-    props = ["site_id", "dno", "name", "licence_area", "voltage", "gsp", "score", "rank",
+    props = ["site_id", "dno", "country", "operator", "name", "licence_area", "voltage", "gsp", "score", "rank",
              "developer_rank", "developer_rank_local", "stuck_rank", "queue_mw", "demand_headroom_mw",
              "headroom_after_queue_mw", "effective_headroom_mw", "limiting_level", "bsp_id",
              "stuck_mw", "oversubscription", *PCT_COLS]
@@ -253,6 +318,10 @@ def get_site(site_id: str) -> dict:
         if key == "utilisation":
             source = _source(dno, "observed_peak_mw")
             value = None if value is None else round(100 * value, 1)
+            if source is None and s.get("capacity_taken_mw") is not None:
+                # Spain: no peak demand published; share of firm access capacity already taken.
+                source = _source(dno, "capacity_taken_mw")
+                note = "Capacity already taken ÷ (taken + published headroom). The CNMC data has no peak demand."
         elif key in ("stuck_mw", "oversubscription"):
             # derived from the demand queue and published headroom
             source, extra_sources = queue_source, [headroom_source]
@@ -260,7 +329,9 @@ def get_site(site_id: str) -> dict:
             source = _source(dno, disp["field"])
         w = weights.get(key, {})
         if value is None:
-            note = "Not published for this substation; scored on the other signals."
+            note = ("Not scored (see above)." if not s.get("scorable")
+                    else "Not published for this substation; scored on the other signals." if source
+                    else "Not published by this network's data source; scored on the other signals.")
         signals.append({
             "key": key,
             "label": disp["label"],
@@ -303,6 +374,12 @@ def get_site(site_id: str) -> dict:
     return {
         "site_id": s["site_id"],
         "dno": dno,
+        "country": s.get("country"),
+        "operator": s.get("operator"),
+        "operator_name": s.get("operator_name"),
+        "province": s.get("province"),
+        "municipality": s.get("municipality"),
+        "reserved": bool(s.get("reserved")),
         "name": s["name"],
         "lat": s["lat"],
         "lon": s["lon"],
@@ -311,7 +388,7 @@ def get_site(site_id: str) -> dict:
         "gsp": s["gsp"],
         "score": s["score"],
         "rank": s["rank"],
-        "rank_of": int(sites["score"].notna().sum()),
+        "rank_of": int(sites.loc[sites["country"] == s.get("country"), "score"].notna().sum()),
         "queue": {"queue_mw": s.get("queue_mw"), "source": queue_source, "note": queue_note},
         "developer": {
             "headroom_after_queue_mw": s.get("headroom_after_queue_mw"),
@@ -325,7 +402,8 @@ def get_site(site_id: str) -> dict:
         "capacity": {
             "firm_capacity_mw": s["firm_capacity_mw"],
             "observed_peak_mw": s["observed_peak_mw"],
-            "source": _source(dno, "firm_capacity_mw"),
+            "capacity_taken_mw": s.get("capacity_taken_mw"),
+            "source": _source(dno, "firm_capacity_mw") or _source(dno, "capacity_taken_mw"),
         },
         "headroom_2030": {"values": headroom_2030, "source": _source(dno, "headroom_2030_mw")},
         "location_source": _source(dno, "lat"),
@@ -477,11 +555,31 @@ def list_bsps() -> dict:
 
 
 @app.get("/story")
-def story() -> dict:
-    """The Fuse story: chapters built from the gold layer, each with sources and a map focus."""
-    data = _load()
-    out = build_story(data, _source, _dnos(data), data["snapshots"])
-    return _jsonable(out)
+def story(country: str = "GB") -> dict:
+    """The Fuse story for one country: chapters built from the gold layer, each with sources and a map focus."""
+    full = _load()
+    country = _check_country(full, country)
+    data = _country_data(full, country)
+    dnos = [d for d in _dnos(full) if d["country"] == country]
+    if any(d["has_topology"] for d in dnos):
+        out = build_story(data, _source, dnos, data["snapshots"])
+    else:
+        out = build_story_es(data, _source, dnos[0])
+    return _jsonable(out | {"country": country})
+
+
+@app.get("/operators")
+def list_operators(country: str = "ES") -> dict:
+    """Distribution network operators in one country, most stuck demand first (gold.operator_mart)."""
+    full = _load()
+    country = _check_country(full, country)
+    m = full["gold_operator_mart"]
+    rows = [{k: _clean(v) for k, v in r.items()} for r in m[m["country"] == country].to_dict("records")]
+    dnos = full["dnos"].loc[full["dnos"]["country"] == country, "code"]
+    return {"country": country, "count": len(rows), "operators": rows,
+            "sources": {d: _source(d, "operator") or _source(d, "demand_headroom_mw") for d in dnos},
+            "note": "Sums over each operator's busbars are indicative: capacities at neighbouring nodes affect "
+                    "each other, so they aren't strictly additive."}
 
 
 @app.get("/gsps")

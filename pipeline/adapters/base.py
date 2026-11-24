@@ -31,6 +31,11 @@ HEADROOM_COLUMNS = [
     "observed_peak_mw",
     "demand_headroom_mw",  # published (firm) demand headroom
 ]
+# Optional: capacity already granted to connected/accepted demand. Where a DNO publishes
+# this but no peak demand (Spain), utilisation = taken / (taken + published headroom).
+OPTIONAL_HEADROOM_COLUMNS = ["capacity_taken_mw"]
+# Optional site columns, passed through when present (Spain: the distributor behind each busbar).
+OPTIONAL_SITE_COLUMNS = ["operator", "operator_name", "province", "municipality", "reserved"]
 FUTURE_HEADROOM_COLUMNS = ["site_id", "scenario", "year", "headroom_mw"]
 QUEUE_COLUMNS = [
     "site_id",
@@ -95,11 +100,18 @@ class DNOInfo:
     map_zoom: float
     min_sites: int            # data quality check: fewer sites than this = a broken download
     fallback_id_prefix: str   # site_id prefix used when a site can't be matched to its stable ID
+    country: str = "GB"       # sites are scored and ranked within their country (docs/SCORING.md)
+    publisher: str = ""       # who to credit, if not `name` (e.g. "CNMC" for Spain)
+    has_topology: bool = True  # publishes a GSP → BSP → primary tree (checks and the upstream view use it)
+    bbox: tuple[tuple[float, float], tuple[float, float]] = ((49.5, 61.0), (-8.7, 2.1))  # (lat range, lon range)
+    min_scorable_share: float = 0.98  # data quality check: share of sites that can be scored
 
     def as_row(self) -> dict:
         d = self.__dict__.copy()
         d["licence_areas"] = ",".join(self.licence_areas)
         d["map_lon"], d["map_lat"] = d.pop("map_center")
+        (d["lat_min"], d["lat_max"]), (d["lon_min"], d["lon_max"]) = d.pop("bbox")
+        d["publisher"] = self.publisher or self.name
         return d
 
 

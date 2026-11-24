@@ -82,7 +82,7 @@ export default function MapView({
       style: STYLE_URL,
       center: LONDON,
       zoom: 9,
-      minZoom: 6,
+      minZoom: 4.5,
       attributionControl: false,
     });
     map.current = m;

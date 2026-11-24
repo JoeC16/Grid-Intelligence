@@ -22,6 +22,8 @@ from .adapters.base import (
     GSP_QUEUE_COLUMNS,
     HEADROOM_COLUMNS,
     LARGE_DEMAND_COLUMNS,
+    OPTIONAL_HEADROOM_COLUMNS,
+    OPTIONAL_SITE_COLUMNS,
     QUEUE_COLUMNS,
     SITES_COLUMNS,
     DNOAdapter,
@@ -40,7 +42,8 @@ SIGNAL_COLUMNS = [
 ]
 
 SITE_COLUMNS = [
-    "site_id", "dno", "name", "lat", "lon", "voltage", "licence_area", "gsp",
+    "site_id", "dno", "country", "name", "lat", "lon", "voltage", "licence_area", "gsp",
+    *OPTIONAL_SITE_COLUMNS, "capacity_taken_mw",
     "firm_capacity_mw", "demand_headroom_mw", "observed_peak_mw",
     "queue_mw", "queue_source", "connections_last_year", "headroom_2030_mw",
 ]  # + headroom_2030_<scenario> columns, then flags and sources
@@ -66,11 +69,18 @@ def headroom_by_scenario(future: pd.DataFrame, year: int = HEADROOM_YEAR) -> pd.
 
 
 def build_sites(adapter: DNOAdapter) -> pd.DataFrame:
-    sites = _check(adapter.fetch_sites(), SITES_COLUMNS, "fetch_sites")
+    raw_sites = adapter.fetch_sites()
+    sites = _check(raw_sites, SITES_COLUMNS, "fetch_sites")
+    # Optional columns: the distributor defaults to the DNO itself.
+    defaults = {"operator": adapter.dno, "operator_name": adapter.info.name, "province": None,
+                "municipality": None, "reserved": False}
+    sites = sites.assign(**{c: raw_sites[c] if c in raw_sites else defaults[c] for c in OPTIONAL_SITE_COLUMNS})
     if sites["site_id"].duplicated().any():
         dups = sites.loc[sites["site_id"].duplicated(), "site_id"].tolist()
         raise ValueError(f"fetch_sites returned duplicate site_ids: {dups[:5]}")
-    headroom = _check(adapter.fetch_headroom(), HEADROOM_COLUMNS, "fetch_headroom")
+    raw_head = adapter.fetch_headroom()
+    headroom = _check(raw_head, HEADROOM_COLUMNS, "fetch_headroom").assign(
+        capacity_taken_mw=raw_head["capacity_taken_mw"] if "capacity_taken_mw" in raw_head else float("nan"))
     queue = _check(adapter.fetch_queue(), QUEUE_COLUMNS, "fetch_queue")
     future = _check(adapter.fetch_future_headroom(), FUTURE_HEADROOM_COLUMNS, "fetch_future_headroom")
     wide = headroom_by_scenario(future)
@@ -84,6 +94,7 @@ def build_sites(adapter: DNOAdapter) -> pd.DataFrame:
     df["headroom_2030_mw"] = df[default_col] if default_col in df else pd.NA
     df["headroom_2030_scenario"] = adapter.default_scenario
     df["dno"] = adapter.dno
+    df["country"] = adapter.info.country
     df = df.rename(columns={"voltage_kv": "voltage"})
 
     df["missing_signals"] = df[SIGNAL_COLUMNS].isna().apply(

@@ -9,7 +9,7 @@ interface Props {
   onClose: () => void;
 }
 
-const fmt = (v: number) => v.toLocaleString("en-GB", { maximumFractionDigits: 1 });
+const fmt = (v: number | string) => (typeof v === "number" ? v.toLocaleString("en-GB", { maximumFractionDigits: 1 }) : v);
 
 export default function StoryPanel({ chapters, index, onIndex, error, onClose }: Props) {
   const c = chapters?.[index];

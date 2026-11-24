@@ -41,10 +41,10 @@ After changing Vercel variables, redeploy (Deployments → latest → ⋯ → Re
 
 `refresh.yml`, step by step:
 
-1. Restores earlier bronze snapshots from GitHub releases.
-2. Takes a new snapshot from the UKPN portal and builds everything: `uv run python -m pipeline.run --refresh`.
-3. Runs the **data quality checks** (`pipeline/checks.py`, 25 checks). **A failure stops the run: nothing is stored or deployed.**
-4. Stores the snapshot as a release if any dataset changed (publish date or row count); otherwise skips it.
+1. Restores earlier bronze snapshots from GitHub releases (`snapshot-ukpn-<day>`, `snapshot-es-<day>`).
+2. Takes a new snapshot from the UKPN portal and the CNMC capacity maps (Spain, no key) and builds everything: `uv run python -m pipeline.run --refresh`.
+3. Runs the **data quality checks** (`pipeline/checks.py`, per DNO plus national; 35 today). **A failure stops the run: nothing is stored or deployed.**
+4. Stores each DNO's snapshot as a release if any of its datasets changed (publish date or row count); otherwise skips it. The CNMC updates monthly, so most weeks Spain's snapshot is skipped.
 5. Runs the full test suite and builds the web app.
 6. Deploys to Vercel production.
 
@@ -60,6 +60,7 @@ The run log lists every check with PASS / FAIL and the numbers behind it. Typica
 | `sites matched to a FLOC`, `GSP mapped`, `BSPs matched…` | Names or IDs changed at UKPN | Run `uv run python -m pipeline.profile_raw` and compare docs/PROFILE.md; update the aliases in `adapters/ukpn.py` |
 | `every field has a dataset, publish date and licence` | Portal metadata missing | Check `_manifest.json` in the snapshot |
 | `no dataset missing from the latest snapshot` | A download failed or a dataset was withdrawn | Rerun; if withdrawn, decide how the app copes without it |
+| `ES: …` (any) | The CNMC changed its map layers (names, fields) or a month's upload is partial | Open the CNMC map page (README) and the layer URL in `adapters/cnmc_es.py`; check field names; rerun |
 
 The site keeps serving the last good deploy until a run passes.
 
@@ -85,6 +86,7 @@ vercel deploy --prod                 # needs a Vercel login or VERCEL_TOKEN
 ## Known limits
 
 - The rate limit is per server instance (Vercel can run several), so it is a soft limit; the Anthropic spend limit is the hard one.
-- First request after a quiet spell takes ~6 s (the function loads the data). Later ones take under 0.5 s.
+- First request after a quiet spell takes ~6 s (the function starts). The map's start-up data is served from the CDN (`public/data/`), so this only affects site detail and the Ask box.
+- Spain: the CNMC figures are indicative and not additive across busbars; the map covers distributors that report to the CNMC (59 in October 2026); there is no upstream tree, forecast or connection count for Spain.
 - Straight after a deploy, the very first request to a newly added endpoint has twice returned "Not Found" (an older instance answering); a retry seconds later works. Check new endpoints twice before calling a deploy broken.
 - Snapshot history only grows when UKPN republishes; between publications the refresh stores nothing new.

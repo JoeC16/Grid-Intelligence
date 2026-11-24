@@ -157,3 +157,26 @@ Part B — SPEN adapter (needs SPEN_API_KEY):
 - [ ] `adapters/spen.py` implementing DNOAdapter: sites and headroom from the heatmap, queue from Table 6 / heatmap activity, 2030 headroom from the NSHR, topology from the heatmap's GSP/BSP fields.
 - [ ] Run both adapters; checks per DNO; deploy.
 - Done when: SPEN sites appear on the map with the same signals, sources and upstream view as UKPN, and the checks pass for both.
+
+## Phase 13 — Spain: demand capacity from the CNMC national maps
+Why: Fuse is buying Spanish distribution networks (La Barona first) because demand there is stuck: "in 2024, half of the businesses that asked to plug into the grid were told no". Spain now publishes, for every distribution substation busbar above 1 kV, the firm demand capacity left, the capacity taken and the requests admitted but not yet evaluated — the same shape as our UKPN signals.
+
+What the data supports (checked 2026-11-24):
+- **CNMC national demand map** (public ArcGIS feature services, no key, monthly; period shown: October 2026). Built from the data every network operator must send under Circular informativa 6/2025.
+  - `Demanda_en_Distribucion` layer 4: 6,182 busbars, 59 distributors (i-DE, e-distribución, UFD, Hidrocantábrico, Viesgo, and ~50 small distributors). Fields: operator code and name, province, municipality, substation, voltage, available firm demand capacity (MW), reserved node, occupied (MW), admitted and not evaluated (MW), "nudo 0" flag; point geometry (2 of 6,182 off-map).
+  - `Demanda_en_Transporte_v2` layer 11: 937 transmission busbars (Red Eléctrica): demand capacity by criterion, storage capacity, occupied, admitted, free bays.
+  - First look: 86.8% of distribution busbars show zero firm demand capacity; 6,971 MW available, 94,874 MW occupied, 3,946 MW admitted and not yet evaluated.
+- **Operator files** as a cross-check: e-distribución publishes the same table monthly as CSV/XLSX.
+- **Not available:** no GSP/BSP-style tree (transmission ↔ distribution link must be inferred or left out), no DFES-style forecast, no connection counts. Values are indicative and, per the CNMC, not additive across nodes.
+
+Plan:
+- [x] Confirm the reuse licence/terms for the CNMC maps and record it in README (attribution "Fuente: CNMC"). Stop if reuse isn't allowed.
+- [x] `adapters/cnmc_es.py` (a DNOAdapter for "Spain, all distributors"): bronze snapshot of both layers per month; site = substation busbar; published headroom = available firm demand capacity; queue = admitted not evaluated; utilisation = occupied / (occupied + available); signals Spain doesn't publish left missing. Licence areas = distributors.
+- [x] Separate scoring for Spain: percentiles within Spain only (different rules and units from GB; a national GB+ES ranking would mislead). Documented in docs/SCORING.md.
+- [x] **Distributor view** (the Fuse question: which networks to buy or expand): one row per distributor — busbars, share with zero capacity, MW queued, MW available, MW stuck — sortable, each figure linked to the CNMC layer and period.
+- [x] Map: a GB/Spain switch; same colours, panels and sources; Spanish place names kept as published; UI text says "published capacity (CNMC)", never "available capacity" for a site.
+- [x] Story chapter set for Spain built from the data (no hand-typed numbers); Ask box tools scoped per country.
+- [x] Checks for Spain (row counts vs last month, coordinates in Spain, every distributor described); monthly refresh in the workflow.
+- Done when: Spain shows on the map with scores, a distributor ranking and sources, and its checks pass.
+- Phase 13 done (2026-11-24): `adapters/cnmc_es.py` reads the CNMC demand layers (6,182 busbars, 59 distributors, October 2026); licence CC BY-SA 4.0 per CNMC|Data terms (recorded in README, flagged for legal review); scores and ranks per country; "Nudo 0" busbars (408, undefined in the data) shown but not scored; utilisation = taken / (taken + published headroom); `gold.operator_mart` + `/operators` + Distributors panel (sortable, CSV); Country switch, Spain filters (distributors, voltage bands), Spain side panel; six Spain story chapters incl. "Around La Barona" (config/story.yaml); Ask box: country filter, Spanish municipality lookup, Spain prompt; checks per DNO (bbox, scorable share, topology checks only where published); refresh stores a bronze archive per DNO. Transmission (Red Eléctrica) layer kept in bronze, not shown yet.
+

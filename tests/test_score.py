@@ -137,3 +137,27 @@ def test_config_loads():
     assert dev.load_mw_default == 50
     assert (dev.filter_column, dev.rank_by, dev.rank_by_local) == (
         "demand_headroom_mw", "effective_headroom_mw", "headroom_after_queue_mw")
+
+
+def test_scores_and_ranks_are_per_country():
+    from pipeline.score import load_config, score
+    signals, views = load_config()
+    n = 4
+    rows = []
+    for country, base in [("GB", 0.0), ("ES", 100.0)]:
+        for i in range(n):
+            rows.append({"site_id": f"{country}{i}", "country": country, "scorable": True,
+                         "queue_mw": base + i, "demand_headroom_mw": 5.0 - i, "firm_capacity_mw": 10.0,
+                         "observed_peak_mw": 5.0 + i, "connections_last_year": i, "headroom_2030_mw": 3.0 - i,
+                         "effective_headroom_mw": 5.0 - i - (base + i)})
+    s = score(pd.DataFrame(rows), signals, views).set_index("site_id")
+    # Each country has its own rank 1, and the same relative position gets the same score.
+    assert s.loc["GB3", "rank"] == 1 and s.loc["ES3", "rank"] == 1
+    assert s.loc["GB3", "score"] == s.loc["ES3", "score"]
+
+
+def test_capacity_taken_gives_utilisation_where_peak_missing():
+    from pipeline.score import add_derived
+    df = pd.DataFrame({"queue_mw": [1.0], "demand_headroom_mw": [20.0], "firm_capacity_mw": [float("nan")],
+                       "observed_peak_mw": [float("nan")], "capacity_taken_mw": [60.0]})
+    assert add_derived(df)["utilisation"].iloc[0] == pytest.approx(0.75)

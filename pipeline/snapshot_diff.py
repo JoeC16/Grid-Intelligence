@@ -3,7 +3,7 @@
 Usage:  uv run python -m pipeline.snapshot_diff <previous_dir> <latest_dir>
 
 Compares each dataset's portal publish date and row count from the manifests.
-Used by the refresh workflow to store a snapshot only when UKPN republished something.
+Used by the refresh workflow to store a snapshot only when a DNO (or the CNMC) republished something.
 """
 
 from __future__ import annotations
