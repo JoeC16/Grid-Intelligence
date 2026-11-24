@@ -471,6 +471,7 @@ class Answer:
     tool_calls: list[dict] = field(default_factory=list)
     stop_reason: str | None = None
     model: str | None = None
+    usage: dict = field(default_factory=dict)  # tokens summed over the tool loop
 
 
 def ask(question: str, sites: pd.DataFrame, get_site: Callable[[str], dict], client: Any = None,
@@ -489,6 +490,7 @@ def ask(question: str, sites: pd.DataFrame, get_site: Callable[[str], dict], cli
     messages: list[dict] = [{"role": "user", "content": question}]
     tool_outputs: list[str] = []
     calls: list[dict] = []
+    usage = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "requests": 0}
 
     for _ in range(MAX_ROUNDS):
         response = client.beta.messages.create(
@@ -503,6 +505,10 @@ def ask(question: str, sites: pd.DataFrame, get_site: Callable[[str], dict], cli
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",
         )
+        u = getattr(response, "usage", None)
+        usage["requests"] += 1
+        for k in ("input_tokens", "output_tokens", "cache_read_input_tokens"):
+            usage[k] += int(getattr(u, k, 0) or 0) if u is not None else 0
         if response.stop_reason == "refusal":
             return Answer("I can't help with that question.", [], [], calls, "refusal", response.model)
         if response.stop_reason != "tool_use":
@@ -538,6 +544,7 @@ def ask(question: str, sites: pd.DataFrame, get_site: Callable[[str], dict], cli
         tool_calls=calls,
         stop_reason=response.stop_reason,
         model=response.model,
+        usage=usage,
     )
 
 

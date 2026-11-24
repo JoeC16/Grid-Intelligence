@@ -175,15 +175,23 @@ export interface QueryResult {
   disclaimer: string;
 }
 
-export async function askQuestion(question: string): Promise<QueryResult> {
+export class AskError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export async function askQuestion(question: string, accessCode: string): Promise<QueryResult> {
   const res = await fetch(`${BASE}/query`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Access-Code": accessCode },
     body: JSON.stringify({ question }),
   });
   if (!res.ok) {
     const detail = await res.json().then((d) => d.detail).catch(() => null);
-    throw new Error(typeof detail === "string" ? detail : `${res.status} ${res.statusText}`);
+    throw new AskError(typeof detail === "string" ? detail : `${res.status} ${res.statusText}`, res.status);
   }
   return res.json() as Promise<QueryResult>;
 }

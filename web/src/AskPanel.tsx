@@ -1,5 +1,22 @@
 import { useState, type ReactNode } from "react";
-import { askQuestion, type QueryResult } from "./api";
+import { AskError, askQuestion, type QueryResult } from "./api";
+
+// The access code is remembered in this browser only (storage can be blocked: never rely on it).
+const CODE_KEY = "grid.askAccessCode";
+const readCode = () => {
+  try {
+    return localStorage.getItem(CODE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+};
+const saveCode = (c: string) => {
+  try {
+    localStorage.setItem(CODE_KEY, c);
+  } catch {
+    /* storage unavailable: the code lasts for this page only */
+  }
+};
 
 const EXAMPLES = [
   "Where could a 50 MW data centre connect fastest within 30 km of Slough?",
@@ -62,6 +79,8 @@ export default function AskPanel({ result, onResult, selectedId, onSelect, onClo
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [code, setCode] = useState(readCode);
+  const [needCode, setNeedCode] = useState(false);
 
   const submit = async (q: string) => {
     if (q.trim().length < 3 || loading) return;
@@ -70,8 +89,10 @@ export default function AskPanel({ result, onResult, selectedId, onSelect, onClo
     setError(null);
     onResult(null);
     try {
-      onResult(await askQuestion(q.trim()));
+      onResult(await askQuestion(q.trim(), code));
+      setNeedCode(false);
     } catch (e) {
+      if (e instanceof AskError && e.status === 401) setNeedCode(true);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
@@ -92,6 +113,22 @@ export default function AskPanel({ result, onResult, selectedId, onSelect, onClo
         </button>
       </div>
 
+      {(needCode || !code) && (
+        <label className="flex items-center gap-2 px-4 pt-3 text-xs text-stone-600">
+          Access code
+          <input
+            type="password"
+            value={code}
+            onChange={(e) => {
+              setCode(e.target.value);
+              saveCode(e.target.value);
+            }}
+            autoComplete="off"
+            aria-label="Access code"
+            className="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1 text-sm text-stone-900"
+          />
+        </label>
+      )}
       <form
         className="flex gap-2 px-4 pt-3"
         onSubmit={(e) => {

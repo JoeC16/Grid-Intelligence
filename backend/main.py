@@ -10,8 +10,11 @@ Endpoints
 
 from __future__ import annotations
 
+import json
+import logging
 import math
 import os
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
@@ -19,13 +22,13 @@ from typing import Annotated, Any
 import duckdb
 from dotenv import load_dotenv
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from pydantic import BaseModel, Field
 
-from backend import assistant
+from backend import assistant, guard
 from backend.story import build_story
 from pipeline.score import load_config
 
@@ -330,13 +333,18 @@ def _site_for_tool(site_id: str) -> dict:
         return {"error": exc.detail}
 
 
+log = logging.getLogger("grid.ask")
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+
 @app.post("/query")
-def query(body: QueryIn) -> dict:
+def query(body: QueryIn, request: Request) -> dict:
     """Answer a question with Claude, using search_sites / get_site / locate_place.
 
     Only numbers returned by those tools may appear in the answer; any that
     can't be matched to a tool result are listed in unverified_numbers.
     """
+    visitor = guard.check_access(request)  # off without ASK_ACCESS_CODE; code + rate limit
     if not assistant.anthropic_key():
         raise HTTPException(
             status_code=503,
@@ -345,6 +353,7 @@ def query(body: QueryIn) -> dict:
     import anthropic
 
     sites = _load()["sites"]
+    started = time.monotonic()
     try:
         result = assistant.ask(body.question, sites, _site_for_tool, bsps=_load()["bsps"], gsps=_load()["gsps"])
     except anthropic.RateLimitError:
@@ -354,6 +363,13 @@ def query(body: QueryIn) -> dict:
     except anthropic.APIConnectionError:
         raise HTTPException(status_code=502, detail="Couldn't reach the AI service.")
 
+    # One structured line per question (Vercel logs): no raw IPs, no question text.
+    log.info(json.dumps({
+        "event": "ask", "visitor": visitor, "question_chars": len(body.question),
+        "tools": [c["name"] for c in result.tool_calls], "stop_reason": result.stop_reason,
+        "unverified_numbers": len(result.unverified_numbers), "usage": result.usage,
+        "seconds": round(time.monotonic() - started, 1), "model": result.model,
+    }))
     by_id = sites.set_index("site_id")
     return {
         "answer": result.answer,

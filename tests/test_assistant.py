@@ -214,9 +214,40 @@ def test_key_from_either_variable(monkeypatch):
 def test_query_without_key_is_503(monkeypatch):
     for v in assistant.KEY_ENV_VARS:
         monkeypatch.delenv(v, raising=False)
-    r = TestClient(app).post("/query", json={"question": "Where is demand stuck?"})
+    monkeypatch.setenv("ASK_ACCESS_CODE", "letmein")
+    r = TestClient(app).post("/query", json={"question": "Where is demand stuck?"}, headers={"X-Access-Code": "letmein"})
     assert r.status_code == 503
     assert "ANTHROPIC_API_KEY" in r.json()["detail"]
+
+
+# ------------------------------------------------------------ protection
+
+
+def test_ask_is_off_without_an_access_code(monkeypatch):
+    monkeypatch.delenv("ASK_ACCESS_CODE", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "would-be-billable")
+    r = TestClient(app).post("/query", json={"question": "Where is demand stuck?"})
+    assert r.status_code == 503 and "isn't enabled" in r.json()["detail"]
+
+
+def test_ask_rejects_a_wrong_code(monkeypatch):
+    monkeypatch.setenv("ASK_ACCESS_CODE", "letmein")
+    r = TestClient(app).post("/query", json={"question": "Where is demand stuck?"}, headers={"X-Access-Code": "nope"})
+    assert r.status_code == 401
+
+
+def test_ask_rate_limit(monkeypatch):
+    from backend import guard
+    guard._hits.clear()
+    monkeypatch.setenv("ASK_ACCESS_CODE", "letmein")
+    monkeypatch.setenv("ASK_RATE_PER_HOUR", "2")
+    for v in assistant.KEY_ENV_VARS:  # stop before any model call
+        monkeypatch.delenv(v, raising=False)
+    c = TestClient(app)
+    codes = [c.post("/query", json={"question": "Where is demand stuck?"}, headers={"X-Access-Code": "letmein"}).status_code
+             for _ in range(3)]
+    assert codes == [503, 503, 429]  # 503 = past the guard, then no key; third is over the limit
+    guard._hits.clear()
 
 
 # ------------------------------------------------------------ graph tools

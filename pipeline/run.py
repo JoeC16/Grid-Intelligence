@@ -15,7 +15,7 @@ import pandas as pd
 
 from .adapters.base import DNOAdapter
 from .adapters.ukpn import UKPNAdapter
-from . import medallion
+from . import checks, medallion
 from .normalise import build_all
 from .score import load_config, print_all_tops, score, write_scores
 
@@ -105,6 +105,9 @@ def main() -> None:
     _, views = load_config()
     with duckdb.connect(str(DB_PATH), read_only=True) as con:
         print_all_tops(con, views)
+    print("\nData quality checks:")
+    if not checks.report(checks.run()):
+        raise SystemExit("Data quality checks failed: don't deploy this build (see docs/OPERATIONS.md).")
 
 
 if __name__ == "__main__":
