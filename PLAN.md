@@ -198,3 +198,16 @@ Plan:
 - [ ] Network view for Spain (busbars → transmission nodes, coloured like GB's), node cards, the side panel Upstream section, "Rank by transmission nodes", Spain story chapter on upstream limits (incl. La Barona → LA PLANA 220).
 - [ ] Checks: share linked, share of node names matched; tests with small fixtures.
 - Done when: Spain's Network button draws the busbar → transmission tree with sources, and the checks pass.
+
+## Phase 15 — Unlock planner: where new capacity unlocks the most
+Why: the best next move for a grid owner is the node where added capacity releases the most demand downstream. Upstream nodes (GB BSPs, Spain's transmission nodes) can unlock many sites at once; others unlock nothing until a large queue is cleared.
+
+What the data supports (checked on GB, 2026-11-24): per BSP, the queue beyond its published headroom and the spare published headroom at the primaries under it. E.g. +50 MW at Three Bridges opens 23 MW of new demand and 2 sites for a 10 MW load; Northfleet East needs ~327 MW just to serve its queue before anything new opens. Shared upstream capacity is not double-counted: new demand = min(spare at the sites, headroom left upstream).
+
+Plan:
+- [ ] `pipeline/unlock.py`: unlock curve per upstream node for added MW steps (0, 10, 25, 50, 100, 200, 350): queued demand served, new capacity opened, sites able to take a given load; MW needed before anything new opens; flag sites that would also need their own upgrade. Tests with small fixtures.
+- [ ] `gold.unlock_mart` + `/unlock`; ranking of best next moves (MW unlocked per MW added at each step), with a "serve the queue" / "open new capacity" toggle.
+- [ ] What-if graph viewer: pick a node, drag "add MW", downstream sites light up as they unlock; every figure links to its sources.
+- [ ] Story chapter: where reinforcement goes furthest (GB and Spain).
+- [ ] Caveats in the UI and docs/SCORING.md: screening, not an engineering study; published headroom is indicative; no power flow; no reinforcement costs (check the heatmap's budget estimates as a hint).
+- Done when: both countries show an unlock ranking and the what-if viewer, with sources and caveats.
