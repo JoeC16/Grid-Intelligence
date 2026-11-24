@@ -77,7 +77,7 @@ def _load() -> dict[str, pd.DataFrame]:
             FROM sites t LEFT JOIN site_scores s USING (site_id)
             """
         ).df()
-        return {
+        out = {
             "sites": sites,
             "gsps": con.execute("SELECT * FROM gsps").df(),
             "bsps": con.execute("SELECT * FROM bsps").df(),
@@ -96,6 +96,10 @@ def _load() -> dict[str, pd.DataFrame]:
             "sources": con.execute("SELECT * FROM field_sources").df(),
             "dnos": con.execute("SELECT * FROM dnos").df(),
         }
+        # Tag upper-level nodes with their country (BSPs in GB, transmission nodes in Spain).
+        out["bsps"] = out["bsps"].merge(
+            out["dnos"][["code", "country"]].rename(columns={"code": "dno"}), on="dno", how="left")
+        return out
 
 
 PCT_COLS = [f"pct_{k}" for k in SIGNAL_DISPLAY]
@@ -193,6 +197,7 @@ def _dnos(data: dict) -> list[dict]:
             "site_count": int((data["sites"]["dno"] == r["code"]).sum()),
             "country": r.get("country", "GB"), "publisher": r.get("publisher") or r["name"],
             "has_topology": bool(r.get("has_topology", True)),
+            "has_gsp": bool(r.get("has_gsp", True)), "upper_level": r.get("upper_level") or "BSP",
             "data_period": _clean(r.get("data_period")), "snapshot_date": _clean(r.get("snapshot_date")),
         })
     return out
@@ -218,6 +223,8 @@ def _countries(data: dict) -> list[dict]:
             "map_center": [sum(lons) / len(lons), sum(lats) / len(lats)],
             "map_zoom": min(d["map_zoom"] for d in mine) if len(mine) == 1 else min(d["map_zoom"] for d in mine) - 1,
             "has_topology": any(d["has_topology"] for d in mine),
+            "has_gsp": any(d["has_gsp"] for d in mine),
+            "upper_level": mine[0]["upper_level"],
             "data_period": next((d["data_period"] for d in mine if d["data_period"]), None),
         })
     return out
@@ -498,6 +505,9 @@ def _upstream(s: dict, data: dict, dno: str) -> dict:
                 "headroom_mw": r["headroom_mw"], "queue_mw": r["queue_mw"],
                 "headroom_after_queue_mw": r["headroom_after_queue_mw"], "stuck_mw": r["stuck_mw"],
                 "is_this_site": r["site_id"] == s["site_id"],
+                "level": "transmission" if str(r["bsp_id"]).startswith("TX") else "bsp",
+                "cep_mw": r.get("cep_mw"), "free_bays": r.get("free_bays"),
+                "admitted_mw": r.get("admitted_mw"), "occupied_mw": r.get("occupied_mw"),
                 "sources": [x for x in (by_dataset.get(r["headroom_source"]), _source(dno, "queue_mw")) if x],
             }
     gsp = None
@@ -545,6 +555,7 @@ def list_bsps() -> dict:
     children = sites.dropna(subset=["bsp_id"]).groupby("bsp_id")["site_id"].apply(list).to_dict()
     cols = ["bsp_id", "dno", "name", "licence_area", "lat", "lon", "site_id", "gsp", "matched", "note", "headroom_mw",
             "headroom_source", "site_count", "queue_mw", "headroom_after_queue_mw", "stuck_mw", "stuck_rank"]
+    cols += [c for c in ("cep_mw", "free_bays") if c in data["bsps"]]
     rows = [{k: _clean(v) for k, v in r.items()} | {"site_ids": children.get(r["bsp_id"], [])}
             for r in data["bsps"][cols].to_dict("records")]
     sources = {d: _source(d, "bsp_headroom_mw") for d in data["dnos"]["code"]}
@@ -561,7 +572,7 @@ def story(country: str = "GB") -> dict:
     country = _check_country(full, country)
     data = _country_data(full, country)
     dnos = [d for d in _dnos(full) if d["country"] == country]
-    if any(d["has_topology"] for d in dnos):
+    if any(d["has_gsp"] for d in dnos):  # GB-style tree with GSPs, DFES and large demand
         out = build_story(data, _source, dnos, data["snapshots"])
     else:
         out = build_story_es(data, _source, dnos[0])
@@ -590,9 +601,12 @@ def list_gsps() -> dict:
 
 
 @app.get("/network")
-def network() -> dict:
-    """The whole GSP → BSP → primary tree as GeoJSON: edges (lines) and BSP/GSP nodes (points)."""
+def network(country: str | None = None) -> dict:
+    """The network tree as GeoJSON: edges (lines) and upper-level nodes (points).
+    GB: GSP → BSP → primary. Spain: transmission node → busbar. country=None: both."""
     data = _load()
+    if country:
+        data = _country_data(data, _check_country(data, country))
     sites = data["sites"].set_index("site_id")
     bsps = data["bsps"].set_index("bsp_id")
     gsps = data["gold_gsp_mart"].dropna(subset=["lat", "lon"]).set_index("gsp")
@@ -601,8 +615,8 @@ def network() -> dict:
         if node_id.startswith("GSP:"):
             g = node_id[4:]
             return [float(gsps.at[g, "lon"]), float(gsps.at[g, "lat"])] if g in gsps.index else None
-        if node_id.startswith("BSP:"):
-            if node_id in bsps.index and pd.notna(bsps.at[node_id, "lat"]):
+        if node_id in bsps.index:  # BSP:… (GB) or TX:… (Spain's transmission nodes)
+            if pd.notna(bsps.at[node_id, "lat"]):
                 return [float(bsps.at[node_id, "lon"]), float(bsps.at[node_id, "lat"])]
             return None
         return [float(sites.at[node_id, "lon"]), float(sites.at[node_id, "lat"])] if node_id in sites.index else None

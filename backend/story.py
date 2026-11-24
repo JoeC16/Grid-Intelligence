@@ -261,6 +261,22 @@ def _km(lat0: float, lon0: float, lat: pd.Series, lon: pd.Series) -> pd.Series:
     return 6371 * 2 * np.arcsin(np.sqrt(a))
 
 
+def _tx_line(busbars: pd.DataFrame, bsps: pd.DataFrame) -> str:
+    """'Upstream, its distributor names LA PLANA 220 kV: ...' for a substation's busbars."""
+    ids = busbars["bsp_id"].dropna().unique() if "bsp_id" in busbars else []
+    if not len(ids) or "bsp_id" not in bsps:
+        return ""
+    b = bsps[bsps["bsp_id"] == ids[0]]
+    if b.empty:
+        return ""
+    r = b.iloc[0]
+    if not r["matched"]:
+        return f"\n\nUpstream, its distributor names the transmission node **{r['name']}** (not matched to a published figure)."
+    return (f"\n\nUpstream, its distributor names the Red Eléctrica node **{r['name']}**: {_mw(r['headroom_mw'])} MW "
+            f"published headroom for ordinary demand, {_mw(r['queue_mw'])} MW queued under it across "
+            f"{_n(r['site_count'])} busbars.")
+
+
 def _month(period: str | None) -> str | None:
     """'2026-10' -> 'October 2026'."""
     try:
@@ -354,6 +370,41 @@ def build_story_es(data: dict[str, pd.DataFrame], source: callable, dno: dict) -
         "focus": {"view": "investor", "sort": "stuck", "network": False, **view},
     })
 
+    # 3b. Upstream: transmission nodes (Phase 14) ------------------------------------
+    tx = data["bsps"]
+    tx = tx[tx["bsp_id"].astype(str).str.startswith("TX") & tx["matched"].astype(bool)] if "bsp_id" in tx else tx.iloc[0:0]
+    if len(tx):
+        scorable = sites[sites["scorable"]]
+        linked = scorable[scorable["bsp_id"].isin(tx["bsp_id"])]
+        by_tx = scorable[scorable["limiting_level"] == "bsp"]
+        zero_tx = tx[tx["headroom_mw"] <= 0]
+        top_tx = tx[tx["stuck_rank"].notna()].sort_values("stuck_rank").head(5)
+        hidden = by_tx[(by_tx["demand_headroom_mw"] - by_tx["queue_mw"]) > 0]
+        first = top_tx.iloc[0] if len(top_tx) else None
+        chapters.append({
+            "id": "es_upstream",
+            "title": "The limit is often upstream",
+            "body": (
+                f"Each distributor names the Red Eléctrica transmission node its busbars depend on. **{_n(len(linked))}** of "
+                f"{_n(len(scorable))} scored busbars are linked to a node whose demand capacity is published; "
+                f"**{_n(len(zero_tx))}** of those {_n(len(tx))} nodes publish **zero** capacity for new ordinary demand. "
+                f"At **{_n(len(by_tx))}** busbars the transmission node is the tighter limit, and at {_n(len(hidden))} of them "
+                "the busbar itself still shows headroom after its queue: capacity that exists locally but is blocked upstream. "
+                "Most demand queued under a node:\n"
+                + "\n".join(f"- **{r.name}**: {_mw(r.queue_mw)} MW queued under it across {_n(r.site_count)} busbars, "
+                            f"{_mw(r.headroom_mw)} MW published headroom" for r in top_tx.itertuples())
+                + "\n\nMap: the network tree, busbars coloured by their transmission node's stuck MW."
+            ),
+            "facts": [
+                {"label": "Transmission nodes at zero capacity", "value": len(zero_tx), "unit": "nodes"},
+                {"label": "Busbars limited by their transmission node", "value": len(by_tx), "unit": "busbars"},
+                {"label": "Of which with local headroom left", "value": len(hidden), "unit": "busbars"},
+            ],
+            "sources": src("topology", "bsp_headroom_mw", "queue_mw"),
+            "focus": {"view": "investor", "sort": "bsp", "network": True,
+                      **({"center": [float(first["lon"]), float(first["lat"])], "zoom": 8.5} if first is not None else view)},
+        })
+
     # 4. Small distributors ------------------------------------------------------
     big = set(dno["licence_areas"][:-1])  # every area but the last ("Small distributors")
     small = ops[~ops["licence_area"].isin(big)]
@@ -404,6 +455,7 @@ def build_story_es(data: dict[str, pd.DataFrame], source: callable, dno: dict) -
             "body": (
                 f"{ex['place']}: the local substation in the data is **{sub_name}**, run by {own['operator_name'].iloc[0]}.\n"
                 + "\n".join(f"- {busbar(r)}" for r in own.itertuples())
+                + _tx_line(own, data["bsps"])
                 + f"\n\nWithin {ex['radius_km']} km there are **{_n(len(by_sub))}** substations; "
                 f"**{_n(len(with_room))}** of them publish any firm demand capacity. "
                 f"Requests waiting within that radius: {_mw(by_sub['queue'].sum())} MW."
@@ -412,8 +464,8 @@ def build_story_es(data: dict[str, pd.DataFrame], source: callable, dno: dict) -
                 {"label": f"Substations within {ex['radius_km']} km", "value": len(by_sub), "unit": "substations"},
                 {"label": "With any published headroom", "value": len(with_room), "unit": "substations"},
             ],
-            "sources": src("demand_headroom_mw", "capacity_taken_mw", "queue_mw"),
-            "focus": {"view": "investor", "sort": "score", "network": False,
+            "sources": src("demand_headroom_mw", "capacity_taken_mw", "queue_mw", "topology", "bsp_headroom_mw"),
+            "focus": {"view": "investor", "sort": "score", "network": True,
                       # open the busbar with the most capacity taken among those scored
                       "select": (own[own["exclude_reason"].isna()].sort_values("capacity_taken_mw").iloc[-1]
                                  if own["exclude_reason"].isna().any() else own.iloc[-1])["site_id"],

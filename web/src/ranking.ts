@@ -18,6 +18,8 @@ export interface Ranked {
 
 export interface Ranking {
   mode: Mode;
+  /** bsp / developer: what the upper level is called ("BSP" or "transmission node"). */
+  level?: string;
   /** developer only: BSP limits counted */
   upstream?: boolean;
   /** Only sites that take part in this ranking. */
@@ -69,27 +71,34 @@ export function rankByStuck(sites: SiteProps[]): Ranking {
  * headroom, which counts the BSP above the site; false ignores upstream limits.
  * Mirrors filter_rank(local=...) in pipeline/score.py.
  */
-export function rankForLoad(sites: SiteProps[], loadMw: number, upstream = true): Ranking {
+export function rankForLoad(sites: SiteProps[], loadMw: number, upstream = true, level = "BSP"): Ranking {
   const value = (s: SiteProps) => (upstream ? s.effective_headroom_mw : s.headroom_after_queue_mw);
   const items: [string, number][] = sites
     .filter((s) => scorable(s) && s.demand_headroom_mw != null && s.demand_headroom_mw >= loadMw && value(s) != null)
     .map((s) => [s.site_id, value(s)!]);
   const entries = rankDesc(items);
-  return { mode: "developer", entries, n: entries.size, upstream };
+  return { mode: "developer", entries, n: entries.size, upstream, level };
 }
 
 /**
  * Investor "BSPs by stuck MW": every site under a BSP with stuck demand takes
  * that BSP's stuck MW and rank, so the map colours whole branches.
  */
-export function rankBySiteBsp(sites: SiteProps[], bsps: { bsp_id: string; stuck_mw: number | null; stuck_rank: number | null }[]): Ranking {
+export function rankBySiteBsp(
+  sites: SiteProps[],
+  bsps: { bsp_id: string; dno: string; stuck_mw: number | null; stuck_rank: number | null }[],
+  level = "BSP",
+): Ranking {
   const byBsp = new Map(bsps.filter((b) => b.stuck_rank != null).map((b) => [b.bsp_id, b]));
   const entries = new Map<string, Ranked>();
   for (const s of sites) {
     const b = s.bsp_id ? byBsp.get(s.bsp_id) : undefined;
     if (b && scorable(s)) entries.set(s.site_id, { value: b.stuck_mw!, rank: b.stuck_rank! });
   }
-  return { mode: "bsp", entries, n: byBsp.size };
+  // n = ranked nodes in this country (nodes of the sites passed in).
+  const dnos = new Set(sites.map((s) => s.dno));
+  const n = bsps.filter((b) => b.stuck_rank != null && dnos.has(b.dno)).length;
+  return { mode: "bsp", entries, n, level };
 }
 
 /** 0-100 for the colour ramp: the score itself, or rank-based (best = 100). */
@@ -104,12 +113,12 @@ const mw = (v: number) => `${v.toLocaleString("en-GB", { maximumFractionDigits: 
 export function describe(r: Ranking, e: Ranked | undefined): string {
   if (!e) {
     if (r.mode === "stuck") return "no stuck demand";
-    if (r.mode === "bsp") return "BSP has no stuck demand";
+    if (r.mode === "bsp") return `${r.level ?? "BSP"} has no stuck demand`;
     if (r.mode === "developer") return "not enough published headroom";
     return "not scored";
   }
   if (r.mode === "score") return `score ${e.value.toFixed(1)} · rank ${e.rank}`;
   if (r.mode === "stuck") return `${mw(e.value)} stuck · rank ${e.rank}`;
-  if (r.mode === "bsp") return `BSP ${mw(e.value)} stuck · BSP rank ${e.rank}`;
-  return `${mw(e.value)} left after queue${r.upstream ? " (BSP counted)" : ""} · rank ${e.rank}`;
+  if (r.mode === "bsp") return `${r.level ?? "BSP"} ${mw(e.value)} stuck · rank ${e.rank}`;
+  return `${mw(e.value)} left after queue${r.upstream ? ` (${r.level ?? "BSP"} counted)` : ""} · rank ${e.rank}`;
 }

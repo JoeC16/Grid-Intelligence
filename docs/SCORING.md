@@ -105,6 +105,17 @@ What this means in practice:
   published location outside Spain aren't scored either.
 - The CNMC notes capacities at neighbouring nodes affect each other, so sums
   over busbars (per distributor, per area) are indicative, not additive.
+- **Upstream (Phase 14)**: each busbar hangs off the Red Eléctrica transmission
+  node its distributor names in the CNMC generation map ("nudo de afección").
+  The node plays the BSP's role: its headroom = published demand capacity for
+  ordinary loads ("no CEP") minus requests admitted at the node; queue under
+  it = every linked busbar's requests waiting; effective headroom = min(busbar
+  after its queue, node after the queue under it). The capacity for
+  power-electronics loads (CEP, e.g. data centres; CAD1) is shown alongside.
+  Node sections with the same name and voltage are merged (largest capacity,
+  summed taken and admitted). Names that don't match a published node (15%)
+  are shown as published with no capacity: never guessed. Small distributors
+  publish no node, so their busbars are limited only locally.
 - **Distributor view** (`gold.operator_mart`): one row per distribution network
   operator with busbars published, share at zero published headroom, MW
   available, MW waiting, MW stuck, MW taken and its most stuck busbar.

@@ -295,8 +295,9 @@ def test_get_siblings_matches_map_panel():
 @needs_db
 def test_search_bsps_matches_pipeline_ranking():
     d = _load()
-    out = assistant.search_bsps(d["bsps"], {"rank_by": "stuck_mw", "near": None, "licence_areas": None, "limit": 5})
-    stored = d["bsps"].dropna(subset=["stuck_rank"]).sort_values(["stuck_rank", "bsp_id"])
+    out = assistant.search_bsps(d["bsps"], {"rank_by": "stuck_mw", "near": None, "country": "GB", "licence_areas": None, "limit": 5})
+    gb = d["bsps"][d["bsps"]["country"] == "GB"]
+    stored = gb.dropna(subset=["stuck_rank"]).sort_values(["stuck_rank", "bsp_id"])
     assert out["total_matches"] == len(stored)
     assert [r["bsp_id"] for r in out["results"]] == stored["bsp_id"].head(5).tolist()
     assert out["results"][0]["name"] == "Northfleet East"

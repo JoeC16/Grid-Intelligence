@@ -192,12 +192,13 @@ What the data supports (checked 2026-11-24):
 - Caveat: the link is published for generation access ("afección" for generation); it is the operator's own statement of which transmission node a busbar depends on, not a full feeder map. Labelled as such.
 
 Plan:
-- [ ] Read the CNMC transmission demand spec (BOE-A-2025-25253) to label the CEP/CAD criteria correctly; pick the figure shown as "published transmission demand capacity".
-- [ ] Bronze: add the generation layer to `adapters/cnmc_es.py`; `fetch_topology` returns transmission nodes as the upper level (like BSPs) and busbar → node links. Unmatched names kept as published, flagged, no line drawn; never guessed.
-- [ ] Graph: effective headroom for Spain = min(busbar headroom after its queue, transmission node capacity after the queue of every busbar under it); limiting level "busbar" or "transmission".
-- [ ] Network view for Spain (busbars → transmission nodes, coloured like GB's), node cards, the side panel Upstream section, "Rank by transmission nodes", Spain story chapter on upstream limits (incl. La Barona → LA PLANA 220).
-- [ ] Checks: share linked, share of node names matched; tests with small fixtures.
+- [x] Read the CNMC transmission demand spec (BOE-A-2025-25253) to label the CEP/CAD criteria correctly; pick the figure shown as "published transmission demand capacity".
+- [x] Bronze: add the generation layer to `adapters/cnmc_es.py`; `fetch_topology` returns transmission nodes as the upper level (like BSPs) and busbar → node links. Unmatched names kept as published, flagged, no line drawn; never guessed.
+- [x] Graph: effective headroom for Spain = min(busbar headroom after its queue, transmission node capacity after the queue of every busbar under it); limiting level "busbar" or "transmission".
+- [x] Network view for Spain (busbars → transmission nodes, coloured like GB's), node cards, the side panel Upstream section, "Rank by transmission nodes", Spain story chapter on upstream limits (incl. La Barona → LA PLANA 220).
+- [x] Checks: share linked, share of node names matched; tests with small fixtures.
 - Done when: Spain's Network button draws the busbar → transmission tree with sources, and the checks pass.
+- Phase 14 done (2026-11-24): CEP = demand through power electronics ≥ 20 MW (data centres, electrolysers); CAD1/CAD2 = with/without voltage-dip ride-through (CAD2 is 0 everywhere). Node headroom = no-CEP capacity − requests admitted at the node; CEP CAD1 shown alongside. 438 of 512 named nodes matched (85.5%); 4,828 of 5,772 scored busbars linked to a published node; 292 nodes at zero; 2,096 busbars limited by their node (296 with local headroom left). Spain: Network button, "Transmission" ranking, node cards, Upstream section, upstream story chapter, La Barona → LA PLANA 220 kV; Ask tools return nodes; checks per DNO (matched share ≥ 80%, upstream path ≥ 80%).
 
 ## Phase 15 — Unlock planner: where new capacity unlocks the most
 Why: the best next move for a grid owner is the node where added capacity releases the most demand downstream. Upstream nodes (GB BSPs, Spain's transmission nodes) can unlock many sites at once; others unlock nothing until a large queue is cleared.

@@ -103,8 +103,13 @@ function UpstreamSection({ site, onSelect }: { site: SiteDetail; onSelect: (id: 
   const u = site.upstream;
   const b = u.bsp;
   const g = u.gsp;
+  const es = site.country === "ES";
+  const level = es ? "transmission node" : "BSP"; // Spain's upper level: Red Eléctrica node (Phase 14)
+  const Level = es ? "Transmission node" : "BSP";
   const limit =
-    u.limiting_level === "bsp" ? "limited by its BSP" : u.limiting_level === "primary" ? "limited by this site" : u.limiting_level;
+    u.limiting_level === "bsp" ? `limited by its ${level}`
+    : u.limiting_level === "primary" ? "limited by this site"
+    : u.limiting_level === "primary (BSP not published)" ? `${level} headroom not published` : u.limiting_level;
   return (
     <section className="mb-4 rounded-md border border-stone-200 p-3">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-500">Upstream</h3>
@@ -113,17 +118,24 @@ function UpstreamSection({ site, onSelect }: { site: SiteDetail; onSelect: (id: 
         {b ? (
           <>
             <p className="mt-2 text-xs font-medium text-stone-800">
-              BSP: {b.name}
+              {Level}: {b.name}
               {b.is_this_site && <span className="font-normal text-stone-500"> (this site is its own board)</span>}
             </p>
             {b.matched && b.headroom_mw != null ? (
               <>
-                <Row label="Published headroom" value={b.headroom_mw} unit="MW" />
-                <Row label={`Queue under it (${b.site_count} sites)`} value={b.queue_mw} unit="MW" />
+                <Row label={es ? "Published headroom (ordinary demand, after requests at the node)" : "Published headroom"} value={b.headroom_mw} unit="MW" />
+                {es && b.cep_mw != null && <Row label="For power-electronics demand (CEP, e.g. data centres)" value={b.cep_mw} unit="MW" />}
+                <Row label={`Queue under it (${b.site_count} ${es ? "busbars" : "sites"})`} value={b.queue_mw} unit="MW" />
                 <Row label="Left after queue" value={b.headroom_after_queue_mw} unit="MW" />
+                {es && b.free_bays != null && <p className="text-[11px] text-stone-500">{b.free_bays} free bays at the node</p>}
+                {es && (
+                  <p className="text-[11px] text-stone-500">
+                    Link as published by the distributor ("nudo de afección" in the CNMC generation map).
+                  </p>
+                )}
               </>
             ) : (
-              <p className="text-[11px] text-stone-500">{b.note ?? "No published headroom for this BSP."}</p>
+              <p className="text-[11px] text-stone-500">{b.note ?? `No published headroom for this ${level}.`}</p>
             )}
             <p className="text-[11px]">
               {b.sources.map((x, i) => (
@@ -135,7 +147,9 @@ function UpstreamSection({ site, onSelect }: { site: SiteDetail; onSelect: (id: 
             </p>
           </>
         ) : (
-          <p className="mt-2 text-xs text-stone-600">Fed directly from its grid supply point (no BSP).</p>
+          <p className="mt-2 text-xs text-stone-600">
+            {es ? "No transmission node published for this busbar." : "Fed directly from its grid supply point (no BSP)."}
+          </p>
         )}
         <div className="mt-2 flex items-baseline justify-between border-t border-stone-100 pt-2 text-sm">
           <span className="font-medium text-stone-800">Effective headroom</span>
@@ -160,7 +174,7 @@ function UpstreamSection({ site, onSelect }: { site: SiteDetail; onSelect: (id: 
       </div>
       {site.siblings.length > 0 && (
         <div className="mt-3 border-t border-stone-100 pt-2">
-          <p className="text-[11px] text-stone-500">Same BSP ({site.siblings.length}), most effective headroom first:</p>
+          <p className="text-[11px] text-stone-500">Same {level} ({site.siblings.length}), most effective headroom first:</p>
           <ul className="mt-1 space-y-0.5">
             {site.siblings.map((x) => (
               <li key={x.site_id}>
@@ -288,7 +302,7 @@ export default function SidePanel({ site, headline, weights, colocated, onSelect
                 )}
                 {site.reserved && <p className="mt-0.5">Node reserved by the operator for regulatory reasons.</p>}
                 <p className="mt-0.5 text-[11px] text-stone-500">
-                  The CNMC data has no upstream tree, forecasts or connection counts for Spain.
+                  The CNMC data has no forecasts or connection counts for Spain.
                 </p>
               </div>
             )}

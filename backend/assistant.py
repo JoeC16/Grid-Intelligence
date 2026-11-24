@@ -179,10 +179,12 @@ TOOLS = [
                     "required": ["lat", "lon", "radius_km"],
                     "additionalProperties": False,
                 }),
+                "country": _nullable({"type": "string", "enum": ["GB", "ES"],
+                                      "description": "GB: BSPs; ES: Red Eléctrica transmission nodes. null = both."}),
                 "licence_areas": _nullable({"type": "array", "items": {"type": "string", "enum": ["LPN", "SPN", "EPN"]}}),
                 "limit": _nullable({"type": "integer", "description": "Results to return, default 10, max 25."}),
             },
-            "required": ["rank_by", "near", "licence_areas", "limit"],
+            "required": ["rank_by", "near", "country", "licence_areas", "limit"],
             "additionalProperties": False,
         },
     },
@@ -378,6 +380,8 @@ def get_siblings(sites: pd.DataFrame, site_id: str) -> dict:
 
 def search_bsps(bsps: pd.DataFrame, args: dict) -> dict:
     df = bsps.copy()
+    if args.get("country") and "country" in df:
+        df = df[df["country"] == args["country"]]
     if args.get("licence_areas"):
         df = df[df["licence_area"].isin(args["licence_areas"])]
     near = args.get("near")
@@ -397,6 +401,7 @@ def search_bsps(bsps: pd.DataFrame, args: dict) -> dict:
     for r in df.head(limit).to_dict("records"):
         row = {
             "result_rank": int(r["result_rank"]), "bsp_id": r["bsp_id"], "name": r["name"],
+            "level": "transmission node" if str(r["bsp_id"]).startswith("TX") else "BSP",
             "licence_area": r["licence_area"], "gsp": r["gsp"],
             "own_board_site_id": None if pd.isna(r["site_id"]) else r["site_id"],
             "sites_under_it": int(r["site_count"]),
@@ -531,7 +536,7 @@ def _coverage(dnos: list[dict]) -> str:
         f"{d['name']} ({d['code']}) in {d['region']} (licence areas {', '.join(d['licence_areas'])})" for d in dnos)
 
 
-SPAIN_NOTE = """Spain is covered too, from the CNMC's demand capacity map ({period}). For Spain: each site is a substation busbar above 1 kV; published headroom = firm demand access capacity available; queue = requests admitted and not yet evaluated; capacity taken = access capacity already granted; utilisation = taken / (taken + published headroom). Spain publishes no BSP/GSP tree, no forecasts and no recent connection counts, so get_upstream, get_siblings and search_bsps don't apply. Scores and ranks are within each country: never compare a Spanish score or rank with a British one. Use country "ES" in search_sites and locate_place for Spanish questions, and say "distributor" for the Spanish operator.
+SPAIN_NOTE = """Spain is covered too, from the CNMC's demand capacity map ({period}). For Spain: each site is a substation busbar above 1 kV; published headroom = firm demand access capacity available; queue = requests admitted and not yet evaluated; capacity taken = access capacity already granted; utilisation = taken / (taken + published headroom). Spain's tree has one upper level: each busbar's distributor names the Red Eléctrica transmission node it depends on (from the CNMC generation map); get_upstream, get_siblings and search_bsps return these nodes in the "bsp" fields, so call them "transmission node", not BSP. A node's published headroom is Red Eléctrica's demand capacity for ordinary loads minus requests admitted at the node. Spain publishes no GSPs, forecasts or recent connection counts. Scores and ranks are within each country: never compare a Spanish score or rank with a British one. Use country "ES" in search_sites and locate_place for Spanish questions, and say "distributor" for the Spanish operator.
 
 """
 

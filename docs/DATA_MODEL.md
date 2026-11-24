@@ -68,7 +68,7 @@ snapshot); `gold.*` are marts built on them.
 | Table | What it answers |
 |---|---|
 | `sites`, `site_scores` | Every site's signals, investor score, stuck MW, developer ranks, upstream columns (docs/SCORING.md) |
-| `bsps`, `gsps`, `edges` | The network tree and roll-ups |
+| `bsps`, `gsps`, `edges` | The network tree and roll-ups. GB: GSP → BSP → primary. Spain: Red Eléctrica transmission node (`bsp_id` `TX:<name kV>`; `TX?:` = name not matched) → busbar |
 | `headroom_scenarios` | DFES published headroom per site, every scenario and year |
 | `large_demand` | Large committed demand projects (GSP level) |
 | `field_sources` | Every field → DNO, dataset ID, publish date, licence, URL |

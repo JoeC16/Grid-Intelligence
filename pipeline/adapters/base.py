@@ -61,6 +61,8 @@ BSP_COLUMNS = [
     "matched",         # bool: the BSP was matched to a substation with published headroom
     "note",            # why not matched, if not
 ]
+# Optional upper-level columns, passed through when present (Spain's transmission nodes).
+OPTIONAL_BSP_COLUMNS = ["cep_mw", "occupied_mw", "admitted_mw", "free_bays"]
 # Which BSP each site hangs off. bsp_id None = fed directly from its GSP.
 BSP_LINK_COLUMNS = ["site_id", "bsp_id"]
 LARGE_DEMAND_COLUMNS = [
@@ -105,6 +107,10 @@ class DNOInfo:
     has_topology: bool = True  # publishes a GSP → BSP → primary tree (checks and the upstream view use it)
     bbox: tuple[tuple[float, float], tuple[float, float]] = ((49.5, 61.0), (-8.7, 2.1))  # (lat range, lon range)
     min_scorable_share: float = 0.98  # data quality check: share of sites that can be scored
+    has_gsp: bool = True      # sites map to GSPs (GB); Spain has transmission nodes instead
+    upper_level: str = "BSP"  # what the upper level of the tree is called in the UI
+    min_upper_matched: float = 0.90  # check: share of upper-level nodes matched to published headroom
+    min_upstream_path: float = 0.95  # check: share of scorable sites with a known upstream path
 
     def as_row(self) -> dict:
         d = self.__dict__.copy()
