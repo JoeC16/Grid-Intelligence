@@ -78,11 +78,38 @@ class Source:
     licence: str = ""  # e.g. "CC BY 4.0", as published with the dataset
 
 
+@dataclass(frozen=True)
+class DNOInfo:
+    """How a DNO is named, attributed and checked. The app reads every DNO-specific
+    word from this (via the `dnos` table), so nothing outside adapters/ names a DNO."""
+
+    code: str                 # e.g. "UKPN"; matches sites.dno
+    name: str                 # e.g. "UK Power Networks"
+    region: str               # plain-English area, e.g. "London, the South East and the East of England"
+    licence_areas: tuple[str, ...]
+    portal_name: str          # e.g. "UK Power Networks Open Data Portal"
+    portal_url: str
+    licence: str              # licence of the open data, e.g. "CC BY 4.0"
+    licence_url: str
+    map_center: tuple[float, float]  # lon, lat for "show the whole network"
+    map_zoom: float
+    min_sites: int            # data quality check: fewer sites than this = a broken download
+    fallback_id_prefix: str   # site_id prefix used when a site can't be matched to its stable ID
+
+    def as_row(self) -> dict:
+        d = self.__dict__.copy()
+        d["licence_areas"] = ",".join(self.licence_areas)
+        d["map_lon"], d["map_lat"] = d.pop("map_center")
+        return d
+
+
 class DNOAdapter(ABC):
     """One per DNO. Implementations live in pipeline/adapters/<dno>.py."""
 
     #: Short code, e.g. "UKPN".
     dno: str
+    #: Names, attribution, map view and check thresholds.
+    info: DNOInfo
     #: DFES scenario used for the headline headroom_2030_mw.
     default_scenario: str
 

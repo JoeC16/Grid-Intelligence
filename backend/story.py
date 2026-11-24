@@ -13,7 +13,28 @@ import pandas as pd
 
 from backend.assistant import _num
 
-UKPN_VIEW = {"center": [0.35, 51.55], "zoom": 7.6}
+
+
+def _who(dnos: list[dict]) -> str:
+    """'UK Power Networks', or 'UK Power Networks and SP Energy Networks'."""
+    names = [d["name"] for d in dnos]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _whose(dnos: list[dict]) -> str:
+    if len(dnos) > 1:
+        return "The network operators'"
+    name = dnos[0]["name"]
+    return f"{name}'" if name.endswith("s") else f"{name}'s"
+
+
+def _whole_view(dnos: list[dict]) -> dict:
+    """Map view showing every network covered."""
+    if len(dnos) == 1:
+        return {"center": dnos[0]["map_center"], "zoom": dnos[0]["map_zoom"]}
+    lons = [d["map_center"][0] for d in dnos]
+    lats = [d["map_center"][1] for d in dnos]
+    return {"center": [sum(lons) / len(lons), sum(lats) / len(lats)], "zoom": 5.6}
 
 
 def _mw(v: float) -> str:
@@ -25,9 +46,24 @@ def _n(v: float) -> str:
     return f"{int(v):,}"
 
 
-def build_story(data: dict[str, pd.DataFrame], source: callable, snapshot_dates: list[str]) -> dict[str, Any]:
+def build_story(data: dict[str, pd.DataFrame], source: callable, dnos: list[dict],
+                snapshot_dates: list[str]) -> dict[str, Any]:
     """data: sites, bsps, gsps, site_scores, gold_gsp_mart, gold_headroom_timeline,
-    gold_large_demand_by_year, gold_changes, large_demand. source(field) -> source dict."""
+    gold_large_demand_by_year, gold_changes, large_demand. source(dno, field) -> source dict.
+    dnos: the networks covered (backend.main._dnos); all wording about who publishes comes from it."""
+    view = _whole_view(dnos)
+    who = _who(dnos)
+
+    def src(*fields: str) -> list[dict]:
+        """Each field's source for every DNO covered, without repeats."""
+        out = []
+        for f in fields:
+            for d in dnos:
+                x = source(d["code"], f)
+                if x and x not in out:
+                    out.append(x)
+        return out
+
     sites, gm, bsps = data["sites"], data["gold_gsp_mart"], data["bsps"]
     sc = data["site_scores"]
     tl, ldy, ch = data["gold_headroom_timeline"], data["gold_large_demand_by_year"], data["gold_changes"]
@@ -43,7 +79,7 @@ def build_story(data: dict[str, pd.DataFrame], source: callable, snapshot_dates:
         "id": "queue",
         "title": "Demand is queuing",
         "body": (
-            f"Across UK Power Networks, **{_mw(total_queue)} MW** of demand has been offered a connection and isn't "
+            f"Across {who}, **{_mw(total_queue)} MW** of demand has been offered a connection and isn't "
             f"connected yet, {_mw(grid_level)} MW of it at grid level (132 kV and similar). "
             f"At **{_n(len(stuck_sites))}** primary substations the queue is already bigger than the published headroom: "
             f"**{_mw(stuck_sites['stuck_mw'].sum())} MW** of demand that the local network can't take as published. "
@@ -54,8 +90,8 @@ def build_story(data: dict[str, pd.DataFrame], source: callable, snapshot_dates:
             {"label": "Sites with stuck demand", "value": len(stuck_sites), "unit": "sites"},
             {"label": "Stuck at those sites", "value": stuck_sites["stuck_mw"].sum(), "unit": "MW"},
         ],
-        "sources": [source("queue_mw"), source("demand_headroom_mw")],
-        "focus": {"view": "investor", "sort": "stuck", "network": False, **UKPN_VIEW},
+        "sources": src("queue_mw", "demand_headroom_mw"),
+        "focus": {"view": "investor", "sort": "stuck", "network": False, **view},
     })
 
     # 2. Where it's stuck: GSPs and their BSPs ---------------------------------
@@ -76,7 +112,7 @@ def build_story(data: dict[str, pd.DataFrame], source: callable, snapshot_dates:
             "\n\nMap: the network tree, with branches coloured by their BSP's stuck MW."
         ),
         "facts": [{"label": r.gsp, "value": r.stuck_mw, "unit": "MW stuck"} for r in top.itertuples()],
-        "sources": [source("bsp_headroom_mw"), source("queue_mw"), source("grid_level_queue_mw")],
+        "sources": src("bsp_headroom_mw", "queue_mw", "grid_level_queue_mw"),
         "focus": {"view": "investor", "sort": "bsp", "network": True, "center": [first["lon"], first["lat"]], "zoom": 9.3},
     })
 
@@ -100,7 +136,7 @@ def build_story(data: dict[str, pd.DataFrame], source: callable, snapshot_dates:
             {"label": f"{ex['name']}: own figure", "value": ex["demand_headroom_mw"] - ex["queue_mw"], "unit": "MW"},
             {"label": f"{ex['name']}: counting its BSP", "value": ex["effective_headroom_mw"], "unit": "MW"},
         ],
-        "sources": [source("demand_headroom_mw"), source("bsp_headroom_mw"), source("queue_mw")],
+        "sources": src("demand_headroom_mw", "bsp_headroom_mw", "queue_mw"),
         "focus": {"view": "developer", "network": False, "select": ex["site_id"],
                   "center": [ex["lon"], ex["lat"]], "zoom": 11},
     })
@@ -118,15 +154,15 @@ def build_story(data: dict[str, pd.DataFrame], source: callable, snapshot_dates:
         "id": "runout",
         "title": "And it's running out",
         "body": (
-            f"UKPN's own forecasts (DFES, {scenario} scenario) show published headroom shrinking year by year. "
+            f"{_whose(dnos)} own forecasts (DFES, {scenario} scenario) show published headroom shrinking year by year. "
             + " ".join(f"In {y}, **{_n(t.at[y, 'sites_negative'])}** primaries are forecast below zero." for y in years)
             + f" Total published headroom across these primaries falls from {_mw(t.at[y0, 'total_headroom_mw'])} MW in {y0} "
             f"to **{_mw(t.at[y1, 'total_headroom_mw'])} MW** in {y1}. "
             f"Map: the {_n(len(neg_2030_ids))} primaries forecast below zero in {y1} are ringed."
         ),
         "facts": [{"label": f"Primaries below zero, {y}", "value": int(t.at[y, "sites_negative"]), "unit": "sites"} for y in years],
-        "sources": [source("headroom_2030_mw")],
-        "focus": {"view": "investor", "sort": "score", "network": False, "highlight": neg_2030_ids, **UKPN_VIEW},
+        "sources": src("headroom_2030_mw"),
+        "focus": {"view": "investor", "sort": "score", "network": False, "highlight": neg_2030_ids, **view},
     })
 
     # 5. Big demand is already waiting -------------------------------------------
@@ -140,7 +176,7 @@ def build_story(data: dict[str, pd.DataFrame], source: callable, snapshot_dates:
         "id": "bigdemand",
         "title": "Big demand is already waiting",
         "body": (
-            f"UKPN's large demand list counts **{_n(total_n)}** demand-only projects of 5 MVA and above that are committed "
+            f"The large demand list{'s' if len(dnos) > 1 else ''} published by {who} count{'' if len(dnos) > 1 else 's'} **{_n(total_n)}** demand-only projects of 5 MVA and above that are committed "
             f"but not yet connected, **{_mw(total_mva)} MVA** in all — the data-centre-scale end of the queue. "
             f"{_n(recent['projects'].sum())} of them ({_mw(recent['import_capacity_mva'].sum())} MVA) applied between 2021 and 2024. "
             "Largest by grid supply point:\n"
@@ -152,10 +188,10 @@ def build_story(data: dict[str, pd.DataFrame], source: callable, snapshot_dates:
             {"label": "Large demand projects waiting", "value": int(total_n), "unit": "projects"},
             {"label": "Their import capacity", "value": total_mva, "unit": "MVA"},
         ],
-        "sources": [source("large_demand")],
+        "sources": src("large_demand"),
         "focus": {"view": "investor", "sort": "bsp", "network": True,
-                  "center": [gsp_xy.at[g0, "lon"], gsp_xy.at[g0, "lat"]] if g0 in gsp_xy.index else UKPN_VIEW["center"],
-                  "zoom": 9.3 if g0 in gsp_xy.index else UKPN_VIEW["zoom"]},
+                  "center": [gsp_xy.at[g0, "lon"], gsp_xy.at[g0, "lat"]] if g0 in gsp_xy.index else view["center"],
+                  "zoom": 9.3 if g0 in gsp_xy.index else view["zoom"]},
     })
 
     # 6. Where capacity would unlock the most ------------------------------------
@@ -173,8 +209,8 @@ def build_story(data: dict[str, pd.DataFrame], source: callable, snapshot_dates:
             + "\n\nEach figure is published data; open any site on the map for its sources."
         ),
         "facts": [{"label": r.gsp, "value": r.stuck_mw, "unit": "MW stuck"} for r in both.itertuples()],
-        "sources": [source("bsp_headroom_mw"), source("queue_mw"), source("large_demand")],
-        "focus": {"view": "investor", "sort": "bsp", "network": True, **UKPN_VIEW},
+        "sources": src("bsp_headroom_mw", "queue_mw", "large_demand"),
+        "focus": {"view": "investor", "sort": "bsp", "network": True, **view},
     })
 
     # 7. What changes next ----------------------------------------------------------
@@ -184,16 +220,16 @@ def build_story(data: dict[str, pd.DataFrame], source: callable, snapshot_dates:
                 "Each refresh is kept, so movement in queues and headroom builds up over time.")
     else:
         body = (f"Every download is kept as a dated snapshot ({', '.join(snapshot_dates)} so far). "
-                f"No UKPN dataset has been republished between them, so nothing has moved yet. UKPN publishes its Long Term "
-                "Development Statement at the end of May and November; the next refresh after a publication will show how "
-                "queues and headroom have shifted, site by site.")
+                "No dataset has been republished between them, so nothing has moved yet. Network operators publish their "
+                "Long Term Development Statements at the end of May and November; the next refresh after a publication "
+                "will show how queues and headroom have shifted, site by site.")
     chapters.append({
         "id": "next",
         "title": "What changes next",
         "body": body,
         "facts": [{"label": "Snapshots kept", "value": len(snapshot_dates), "unit": "snapshots"}],
-        "sources": [source("queue_mw")],
-        "focus": {"view": "investor", "sort": "score", "network": False, **UKPN_VIEW},
+        "sources": src("queue_mw"),
+        "focus": {"view": "investor", "sort": "score", "network": False, **view},
     })
 
     for i, c in enumerate(chapters):

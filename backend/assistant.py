@@ -37,12 +37,12 @@ MAX_ROUNDS = 8
 PLACES_URL = "https://api.postcodes.io/places"
 PLACES_SOURCE = "Ordnance Survey OS Open Names via postcodes.io (Open Government Licence v3.0)"
 
-SYSTEM_PROMPT = """You answer questions about UK Power Networks (UKPN) primary substations in London, the South East and the East of England (licence areas LPN, SPN, EPN), for grid investors and for developers looking to connect new demand such as data centres. The data covers demand only.
+SYSTEM_PROMPT = """You answer questions about primary substations run by {coverage}, for grid investors and for developers looking to connect new demand such as data centres. The data covers demand only.
 
 Use the tools to look things up. Every number in your answer must appear in a tool result: MW, distances, ranks, scores, counts and percentages. Don't estimate, round differently or do arithmetic of your own; if a figure you'd like isn't in a tool result, describe it in words or say the data doesn't include it.
 
 Terms:
-- Always say "published headroom", never "available capacity". Published headroom is indicative firm capacity from UKPN's open data, not a guarantee of capacity to connect.
+- Always say "published headroom", never "available capacity". Published headroom is indicative firm capacity from the network operator's open data, not a guarantee of capacity to connect.
 - Queue = demand already offered a connection and not yet connected.
 - Headroom after queue = published headroom minus the queue ahead.
 - Stuck demand = queued demand beyond published headroom.
@@ -52,7 +52,7 @@ The data has no connection dates or lead times. If asked how fast or soon someth
 
 The network is a tree: each primary substation hangs off a bulk supply point (BSP), which hangs off a grid supply point (GSP); some primaries are fed directly from the GSP. Effective headroom = the lower of a site's headroom after queue and its BSP's headroom after the queue of every site under it; it is what limits a new connection, and it is what the map's developer view ranks on. Use get_upstream to explain what limits a site, get_siblings for what shares its supply, and search_bsps for questions about BSPs. GSPs publish no MW headroom, only import utilisation (peak / capacity). For a BSP, put its own board's site_id (when it has one) in site_ids.
 
-For any place name, call locate_place first, then search near the coordinates it returns. If the place is outside UKPN's area, say so and give the nearest UKPN sites the search returned.
+For any place name, call locate_place first, then search near the coordinates it returns. If the place is outside the area covered, say so and give the nearest sites the search returned.
 
 Keep the answer short: a sentence or two, then the top few sites with their key figures. Put the site_ids you mention in site_ids, best first."""
 
@@ -91,7 +91,7 @@ TOOLS = [
     {
         "name": "search_sites",
         "description": (
-            "Search and rank UKPN primary substations. Every filter is optional (null = no filter).\n"
+            "Search and rank primary substations across every network covered. Every filter is optional (null = no filter).\n"
             "rank_by:\n"
             "- 'score': investor stuck-demand score, highest first\n"
             "- 'stuck_mw': stuck demand in MW, largest first (sites with none are excluded)\n"
@@ -265,7 +265,7 @@ def search_sites(sites: pd.DataFrame, args: dict) -> dict:
             "bsp": r.get("bsp_name"),
             "stuck_mw": _num(r["stuck_mw"]),
             "stuck_demand_score": _num(r["score"]),
-            "score_rank_ukpn": None if pd.isna(r["rank"]) else int(r["rank"]),
+            "score_rank_all": None if pd.isna(r["rank"]) else int(r["rank"]),
             "utilisation_pct": None if pd.isna(r["utilisation"]) else round(100 * r["utilisation"], 1),
             "published_headroom_2030_mw": _num(r["headroom_2030_mw"]),
         }
@@ -276,8 +276,8 @@ def search_sites(sites: pd.DataFrame, args: dict) -> dict:
         "total_matches": int(len(df)),
         "stuck_demand_score_scale": [0, 100],
         "results": rows,
-        "note": "result_rank ranks the matches by rank_by; score_rank_ukpn is the rank by stuck-demand score "
-        "among all scored UKPN primaries.",
+        "note": "result_rank ranks the matches by rank_by; score_rank_all is the rank by stuck-demand score "
+        "among all scored primaries in every network covered (one national ranking).",
     }
 
 
@@ -474,9 +474,43 @@ class Answer:
     usage: dict = field(default_factory=dict)  # tokens summed over the tool loop
 
 
+def _coverage(dnos: list[dict]) -> str:
+    """'UK Power Networks (UKPN) in London, ... (licence areas LPN, SPN, EPN)' for each network."""
+    return "; and ".join(
+        f"{d['name']} ({d['code']}) in {d['region']} (licence areas {', '.join(d['licence_areas'])})" for d in dnos)
+
+
+def system_prompt(dnos: list[dict]) -> str:
+    return SYSTEM_PROMPT.replace("{coverage}", _coverage(dnos))
+
+
+def tools_for(areas: list[str]) -> list[dict]:
+    """TOOLS with the licence_areas enums set to the areas in the data."""
+    tools = json.loads(json.dumps(TOOLS))
+    for t in tools:
+        la = t["input_schema"]["properties"].get("licence_areas")
+        if la:
+            la["anyOf"][0]["items"]["enum"] = sorted(areas)
+    return tools
+
+
+def _dnos_from_sites(sites: pd.DataFrame) -> list[dict]:
+    """Fallback coverage when the caller passes no DNO descriptions (tests, scripts)."""
+    out = []
+    for code, g in sites.groupby("dno") if "dno" in sites else [("DNO", sites)]:
+        out.append({"code": code, "name": code, "region": "Great Britain",
+                    "licence_areas": sorted(g["licence_area"].dropna().unique())})
+    return out
+
+
 def ask(question: str, sites: pd.DataFrame, get_site: Callable[[str], dict], client: Any = None,
-        bsps: pd.DataFrame | None = None, gsps: pd.DataFrame | None = None) -> Answer:
-    """Run the tool loop for one question. bsps/gsps feed the graph tools."""
+        bsps: pd.DataFrame | None = None, gsps: pd.DataFrame | None = None,
+        dnos: list[dict] | None = None) -> Answer:
+    """Run the tool loop for one question. bsps/gsps feed the graph tools; dnos (backend.main._dnos)
+    names the networks covered in the system prompt."""
+    dnos = dnos or _dnos_from_sites(sites)
+    system = system_prompt(dnos)
+    tools = tools_for([a for d in dnos for a in d["licence_areas"]])
     bsps = bsps if bsps is not None else pd.DataFrame()
     gsps = gsps if gsps is not None else pd.DataFrame()
     import anthropic
@@ -496,8 +530,8 @@ def ask(question: str, sites: pd.DataFrame, get_site: Callable[[str], dict], cli
         response = client.beta.messages.create(
             model=MODEL,
             max_tokens=16000,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
+            system=system,
+            tools=tools,
             messages=messages,
             output_config={"effort": "medium", "format": ANSWER_FORMAT},
             cache_control={"type": "ephemeral"},
@@ -557,7 +591,7 @@ def site_for_model(site: dict) -> dict:
         for s in site["signals"]
     ]
     return {**site, "signals": signals, "stuck_demand_score_scale": [0, 100],
-            "percentile_note": "percentile is 0-100 among UKPN primaries; 100 = most stuck on that signal."}
+            "percentile_note": "percentile is 0-100 among all primaries covered; 100 = most stuck on that signal."}
 
 
 def run_tool(name: str, args: dict, sites: pd.DataFrame, get_site: Callable[[str], dict],

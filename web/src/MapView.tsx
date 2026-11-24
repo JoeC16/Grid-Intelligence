@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource, type Map as MLMap } from "maplibre-gl";
-import type { SitesGeoJSON } from "./api";
+import type { DnoInfo, SitesGeoJSON } from "./api";
 import { INK, UNSCORED } from "./colors";
 
 const STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
 const LONDON: [number, number] = [-0.12, 51.5];
-const DATA_ATTRIBUTION =
-  'Substation data: <a href="https://ukpowernetworks.opendatasoft.com/" target="_blank" rel="noreferrer">UK Power Networks Open Data</a>, CC BY 4.0';
 
 /** What to draw for each site: its colour and the tooltip line. */
 export type Display = Map<string, { color: string; tip: string; rank: number | null }>;
@@ -28,6 +26,18 @@ interface Props {
   flyTo?: { center: [number, number]; zoom: number; key: number } | null;
   onSelectGsp?: (gsp: string) => void;
   onSelect: (siteId: string | null) => void;
+  /** Networks covered, for the map's data attribution. */
+  dnos?: DnoInfo[];
+}
+
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+
+/** "Substation data: <a>UK Power Networks Open Data Portal</a>, CC BY 4.0 · ..." for each DNO. */
+function attributionHtml(dnos: DnoInfo[]): string {
+  const parts = dnos.map(
+    (d) => `<a href="${esc(d.portal_url)}" target="_blank" rel="noreferrer">${esc(d.portal_name)}</a>, ${esc(d.licence)}`,
+  );
+  return parts.length ? `Substation data: ${parts.join(" · ")}` : "";
 }
 
 // Colour and visibility live in feature-state, so view switches, weight
@@ -42,6 +52,7 @@ const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: 
 
 export default function MapView({
   sites, display, visible, selectedId, highlightIds = [], topology = null, network = null, flyTo = null, onSelectGsp, onSelect,
+  dnos = [],
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
@@ -50,6 +61,18 @@ export default function MapView({
   // Latest props for the map's event handlers, which are bound once.
   const latest = useRef({ display, visible, onSelect, onSelectGsp });
   latest.current = { display, visible, onSelect, onSelectGsp };
+
+  // Data attribution, added once the networks covered are known (from /meta).
+  const attribution = attributionHtml(dnos);
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    const ctl = new maplibregl.AttributionControl({ compact: true, customAttribution: attribution || undefined });
+    m.addControl(ctl, "bottom-right");
+    return () => {
+      m.removeControl(ctl);
+    };
+  }, [attribution, ready]);
 
   // Create the map once.
   useEffect(() => {
@@ -64,7 +87,6 @@ export default function MapView({
     });
     map.current = m;
     if (import.meta.env.DEV) (window as unknown as { __map: MLMap }).__map = m; // for browser tests
-    m.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: DATA_ATTRIBUTION }));
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
 
     m.on("load", () => {

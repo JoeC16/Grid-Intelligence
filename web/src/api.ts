@@ -29,6 +29,33 @@ export interface ViewMeta {
   rank_by?: string;
 }
 
+/** A network operator (DNO) covered by the data: names and attribution come from here, never hard-coded. */
+export interface DnoInfo {
+  code: string;
+  name: string;
+  region: string;
+  licence_areas: string[];
+  portal_name: string;
+  portal_url: string;
+  licence: string;
+  licence_url: string;
+  map_center: [number, number];
+  map_zoom: number;
+  site_count: number;
+}
+
+/** "UK Power Networks", or "UK Power Networks and SP Energy Networks". */
+export function networkNames(dnos: DnoInfo[] | undefined, fallback = "the network operators"): string {
+  const names = (dnos ?? []).map((d) => d.name);
+  if (!names.length) return fallback;
+  return names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/** "UK Power Networks (CC BY 4.0)" per DNO, comma-joined. */
+export function dataCredit(dnos: DnoInfo[] | undefined): string {
+  return (dnos ?? []).map((d) => `${d.name} (${d.licence})`).join(", ");
+}
+
 export interface Meta {
   disclaimer: string;
   licence_areas: string[];
@@ -38,11 +65,13 @@ export interface Meta {
   signals: SignalMeta[];
   views: ViewMeta[];
   headroom_2030_scenario: string;
+  dnos: DnoInfo[];
   sources: (Source & { dno: string; field: string; licence: string })[];
 }
 
 export interface SiteProps {
   site_id: string;
+  dno: string;
   name: string;
   licence_area: string;
   voltage: number;
@@ -153,14 +182,30 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export const fetchMeta = () => get<Meta>("/meta");
+// Start-up data published as static files on each deploy (backend/export_static.py), served
+// from the CDN so the first screen doesn't wait for the API to start. Same JSON as the API.
+// If a file is missing (local dev, an older deploy), fall back to the API.
+const STATIC = import.meta.env.VITE_STATIC_URL ?? "/data";
+
+async function staticOrApi<T>(name: string, path: string): Promise<T> {
+  try {
+    const res = await fetch(`${STATIC}/${name}.json`);
+    if (res.ok && (res.headers.get("content-type") ?? "").includes("json")) return (await res.json()) as T;
+  } catch {
+    // fall through to the API
+  }
+  return get<T>(path);
+}
+
+export const fetchMeta = () => staticOrApi<Meta>("meta", "/meta");
 
 export function fetchSites(f: Filters): Promise<SitesGeoJSON> {
   const q = new URLSearchParams();
   f.licenceAreas.forEach((a) => q.append("licence_area", a));
   f.voltages.forEach((v) => q.append("voltage", String(v)));
   if (f.minScore > 0) q.set("min_score", String(f.minScore));
-  return get<SitesGeoJSON>(`/sites?${q}`);
+  const qs = q.toString();
+  return qs ? get<SitesGeoJSON>(`/sites?${qs}`) : staticOrApi<SitesGeoJSON>("sites", "/sites");
 }
 
 export const fetchSite = (id: string) => get<SiteDetail>(`/sites/${encodeURIComponent(id)}`);
@@ -198,6 +243,7 @@ export async function askQuestion(question: string, accessCode: string): Promise
 
 export interface BspRow {
   bsp_id: string;
+  dno: string;
   name: string;
   licence_area: string;
   lat: number | null;
@@ -215,7 +261,7 @@ export interface BspRow {
   site_ids: string[];
 }
 
-export const fetchBsps = () => get<{ count: number; bsps: BspRow[]; source: Source | null }>("/bsps");
+export const fetchBsps = () => staticOrApi<{ count: number; bsps: BspRow[]; sources: Record<string, Source | null> }>("bsps", "/bsps");
 
 export interface StoryChapter {
   id: string;
@@ -235,8 +281,8 @@ export interface StoryChapter {
   };
 }
 
-export const fetchStory = () => get<{ chapters: StoryChapter[]; snapshots: string[]; scenario: string }>("/story");
-export const fetchNetwork = () => get<GeoJSON.FeatureCollection>("/network");
+export const fetchStory = () => staticOrApi<{ chapters: StoryChapter[]; snapshots: string[]; scenario: string }>("story", "/story");
+export const fetchNetwork = () => staticOrApi<GeoJSON.FeatureCollection>("network", "/network");
 
 export interface GspRow {
   gsp: string;
@@ -260,4 +306,4 @@ export interface GspRow {
   in_gsp_list: boolean;
 }
 
-export const fetchGsps = () => get<{ count: number; gsps: GspRow[] }>("/gsps");
+export const fetchGsps = () => staticOrApi<{ count: number; gsps: GspRow[] }>("gsps", "/gsps");

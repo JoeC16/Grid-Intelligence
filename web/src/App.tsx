@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchBsps, fetchGsps, fetchMeta, fetchNetwork, fetchSite, fetchSites, fetchStory, type BspRow, type GspRow, type StoryChapter, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON } from "./api";
+import { networkNames, fetchBsps, fetchGsps, fetchMeta, fetchNetwork, fetchSite, fetchSites, fetchStory, type BspRow, type GspRow, type StoryChapter, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON } from "./api";
 import AskPanel from "./AskPanel";
 import { gradientCss, rampFor, scoreColor, UNSCORED, type Ramp } from "./colors";
 import { LoadInput, Segmented, WeightsPanel } from "./Controls";
@@ -221,7 +221,7 @@ export default function App() {
         big: sc ? sc.value.toFixed(1) : "—",
         color,
         label: investor.score_label ?? investor.label,
-        sub: sc ? `Rank ${sc.rank} of ${scoreRanking!.n} UKPN primaries` : "No score",
+        sub: sc ? `Rank ${sc.rank} of ${scoreRanking!.n} primaries` : "No score",
         secondary: st ? `Stuck demand ${mw(st.value)} MW (rank ${st.rank} of ${stuckRanking.n})` : "No stuck demand",
       };
     }
@@ -322,7 +322,7 @@ export default function App() {
       <header className="z-20 flex print:hidden flex-wrap items-center gap-x-6 gap-y-2 border-b border-stone-200 bg-white px-4 py-2.5">
         <div>
           <h1 className="text-sm font-semibold">Grid Intelligence</h1>
-          <p className="text-[11px] text-stone-500">UK Power Networks primary substations</p>
+          <p className="text-[11px] text-stone-500">{networkNames(meta?.dnos, "Distribution network")} primary substations</p>
         </div>
         {meta && investor && developer && (
           <div className="flex flex-wrap items-center gap-2">
@@ -401,6 +401,7 @@ export default function App() {
             setSelectedGsp(g);
           }}
           onSelect={setSelectedId}
+          dnos={meta?.dnos}
         />
         </div>
 
@@ -433,7 +434,7 @@ export default function App() {
                 `Filters: areas ${filters.licenceAreas.join("/") || "all"}; voltages ${filters.voltages.join("/") || "all"}`,
                 `Sources: ${[...new Map((meta?.sources ?? []).map((s) => [s.dataset_id, `${s.dataset_id} (${s.publish_date}, ${s.licence})`])).values()].join("; ")}`,
                 meta?.disclaimer ?? "Published headroom is indicative and not guaranteed.",
-                "Not a connection offer. Ranks are UKPN-wide; filters only hide rows.",
+                "Not a connection offer. Ranks are across every network covered; filters only hide rows.",
               ]}
               key={mode}
               title={listTitle}
@@ -495,6 +496,7 @@ export default function App() {
               loading={detailLoading}
               error={error}
               onClose={() => setSelectedId(null)}
+              dnos={meta?.dnos}
             />
           </div>
         )}

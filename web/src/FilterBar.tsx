@@ -13,11 +13,12 @@ function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function Chip({ active, onClick, title, children }: { active: boolean; onClick: () => void; title?: string; children: React.ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       aria-pressed={active}
       className={`whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
         active
@@ -32,14 +33,39 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 
 export default function FilterBar({ meta, filters, onChange, shown, showMinScore }: Props) {
   if (!meta) return null;
+  // Areas grouped by network operator; a network chip (shown once there are several) selects all its areas.
+  const dnos = meta.dnos ?? [];
+  const owner = new Map(dnos.flatMap((d) => d.licence_areas.map((a) => [a, d.name] as const)));
+  const areas = [...dnos.flatMap((d) => d.licence_areas.filter((a) => meta.licence_areas.includes(a))),
+    ...meta.licence_areas.filter((a) => !owner.has(a))];
+  const hasAll = (d: (typeof dnos)[number]) => d.licence_areas.every((a) => filters.licenceAreas.includes(a));
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+      {dnos.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Network operator">
+          <span className="mr-1 text-xs text-stone-500">Network</span>
+          {dnos.map((d) => (
+            <Chip
+              key={d.code}
+              active={hasAll(d)}
+              title={`${d.name}: ${d.region}`}
+              onClick={() => {
+                const rest = filters.licenceAreas.filter((a) => !d.licence_areas.includes(a));
+                onChange({ ...filters, licenceAreas: hasAll(d) ? rest : [...rest, ...d.licence_areas] });
+              }}
+            >
+              {d.code}
+            </Chip>
+          ))}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Licence area">
         <span className="mr-1 text-xs text-stone-500">Area</span>
-        {meta.licence_areas.map((a) => (
+        {areas.map((a) => (
           <Chip
             key={a}
             active={filters.licenceAreas.includes(a)}
+            title={owner.get(a)}
             onClick={() => onChange({ ...filters, licenceAreas: toggle(filters.licenceAreas, a) })}
           >
             {a}

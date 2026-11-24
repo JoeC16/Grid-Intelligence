@@ -90,6 +90,7 @@ def _load() -> dict[str, pd.DataFrame]:
             "snapshots": sorted(con.execute("SELECT DISTINCT snapshot_date FROM silver.sites").df()["snapshot_date"]),
             "weights": con.execute("SELECT * FROM score_weights").df(),
             "sources": con.execute("SELECT * FROM field_sources").df(),
+            "dnos": con.execute("SELECT * FROM dnos").df(),
         }
 
 
@@ -146,6 +147,21 @@ def _view_meta(v, stored: pd.DataFrame) -> dict:
     return {**base, "load_mw_default": v.load_mw_default, "filter_column": v.filter_column, "rank_by": v.rank_by}
 
 
+def _dnos(data: dict) -> list[dict]:
+    """The networks covered: names, areas, portal and licence for labels and attribution."""
+    out = []
+    for r in data["dnos"].to_dict("records"):
+        out.append({
+            "code": r["code"], "name": r["name"], "region": r["region"],
+            "licence_areas": r["licence_areas"].split(","),
+            "portal_name": r["portal_name"], "portal_url": r["portal_url"],
+            "licence": r["licence"], "licence_url": r["licence_url"],
+            "map_center": [r["map_lon"], r["map_lat"]], "map_zoom": r["map_zoom"],
+            "site_count": int((data["sites"]["dno"] == r["code"]).sum()),
+        })
+    return out
+
+
 @app.get("/meta")
 def meta() -> dict:
     data = _load()
@@ -164,6 +180,7 @@ def meta() -> dict:
         ],
         "views": [_view_meta(v, stored) for v in views],
         "headroom_2030_scenario": _clean(sites["headroom_2030_scenario"].iloc[0]),
+        "dnos": _dnos(data),
         "sources": [{k: _clean(v) for k, v in r.items()} for r in data["sources"].to_dict("records")],
     }
 
@@ -189,7 +206,7 @@ def list_sites(
     elif not include_unscored:
         df = df[df["score"].notna()]
 
-    props = ["site_id", "name", "licence_area", "voltage", "gsp", "score", "rank",
+    props = ["site_id", "dno", "name", "licence_area", "voltage", "gsp", "score", "rank",
              "developer_rank", "developer_rank_local", "stuck_rank", "queue_mw", "demand_headroom_mw",
              "headroom_after_queue_mw", "effective_headroom_mw", "limiting_level", "bsp_id",
              "stuck_mw", "oversubscription", *PCT_COLS]
@@ -355,7 +372,8 @@ def query(body: QueryIn, request: Request) -> dict:
     sites = _load()["sites"]
     started = time.monotonic()
     try:
-        result = assistant.ask(body.question, sites, _site_for_tool, bsps=_load()["bsps"], gsps=_load()["gsps"])
+        result = assistant.ask(body.question, sites, _site_for_tool, bsps=_load()["bsps"], gsps=_load()["gsps"],
+                               dnos=_dnos(_load()))
     except anthropic.RateLimitError:
         raise HTTPException(status_code=429, detail="The AI service is busy. Try again in a minute.")
     except anthropic.APIStatusError as exc:
@@ -447,11 +465,12 @@ def list_bsps() -> dict:
     data = _load()
     sites = data["sites"]
     children = sites.dropna(subset=["bsp_id"]).groupby("bsp_id")["site_id"].apply(list).to_dict()
-    cols = ["bsp_id", "name", "licence_area", "lat", "lon", "site_id", "gsp", "matched", "note", "headroom_mw",
+    cols = ["bsp_id", "dno", "name", "licence_area", "lat", "lon", "site_id", "gsp", "matched", "note", "headroom_mw",
             "headroom_source", "site_count", "queue_mw", "headroom_after_queue_mw", "stuck_mw", "stuck_rank"]
     rows = [{k: _clean(v) for k, v in r.items()} | {"site_ids": children.get(r["bsp_id"], [])}
             for r in data["bsps"][cols].to_dict("records")]
-    return {"count": len(rows), "bsps": rows, "source": _source(sites["dno"].iloc[0], "bsp_headroom_mw")}
+    sources = {d: _source(d, "bsp_headroom_mw") for d in data["dnos"]["code"]}
+    return {"count": len(rows), "bsps": rows, "sources": sources}
 
 
 # -------------------------------------------------------- story / network --
@@ -461,8 +480,7 @@ def list_bsps() -> dict:
 def story() -> dict:
     """The Fuse story: chapters built from the gold layer, each with sources and a map focus."""
     data = _load()
-    dno = data["sites"]["dno"].iloc[0]
-    out = build_story(data, lambda f: _source(dno, f), data["snapshots"])
+    out = build_story(data, _source, _dnos(data), data["snapshots"])
     return _jsonable(out)
 
 

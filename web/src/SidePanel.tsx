@@ -1,4 +1,4 @@
-import type { Signal, SiteDetail, Source } from "./api";
+import { dataCredit, type DnoInfo, type Signal, type SiteDetail, type Source } from "./api";
 import type { Weights } from "./scoring";
 
 /** The top of the panel: the number the current ranking is about. */
@@ -22,6 +22,7 @@ interface Props {
   loading: boolean;
   error: string | null;
   onClose: () => void;
+  dnos?: DnoInfo[];
 }
 
 const fmt = (v: number | null, digits = 1) =>
@@ -35,7 +36,7 @@ function SourceLink({ source }: { source: Source | null }) {
       target="_blank"
       rel="noreferrer"
       className="text-stone-500 underline decoration-stone-300 underline-offset-2 hover:text-stone-800"
-      title={`Open ${source.dataset_id} on the UKPN Open Data Portal`}
+      title={`Open ${source.dataset_id} on the publisher's open data portal (published ${source.publish_date})`}
     >
       {source.dataset_id} · {source.publish_date}
     </a>
@@ -176,7 +177,7 @@ function UpstreamSection({ site, onSelect }: { site: SiteDetail; onSelect: (id: 
   );
 }
 
-export default function SidePanel({ site, headline, weights, colocated, onSelect, loading, error, onClose }: Props) {
+export default function SidePanel({ site, headline, weights, colocated, onSelect, loading, error, onClose, dnos }: Props) {
   return (
     <aside className="flex h-full w-full flex-col overflow-hidden rounded-t-xl bg-white shadow-xl sm:w-[380px] sm:rounded-none print:h-auto print:w-full print:overflow-visible print:rounded-none print:shadow-none">
       <div className="flex items-start justify-between border-b border-stone-200 px-5 py-4">
@@ -217,7 +218,7 @@ export default function SidePanel({ site, headline, weights, colocated, onSelect
 
       <div className="flex-1 overflow-y-auto px-5 pb-6 print:overflow-visible">
         <p className="hidden pt-3 text-[11px] text-stone-500 print:block">
-          Grid Intelligence site report · printed {new Date().toISOString().slice(0, 10)} · UKPN Open Data (CC BY 4.0) · not a connection offer
+          Grid Intelligence site report · printed {new Date().toISOString().slice(0, 10)} · contains data from {dataCredit(dnos) || "network operators' open data"} · not a connection offer
         </p>
         {error && <p className="mt-4 text-sm text-red-700">{error}</p>}
         {site && (
@@ -280,7 +281,7 @@ export default function SidePanel({ site, headline, weights, colocated, onSelect
 
             <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">Signals</h3>
             <p className="mt-1 text-[11px] text-stone-500">
-              Bars: how stuck vs other UKPN primaries (100 = most stuck).
+              Bars: how stuck vs every other primary covered (100 = most stuck).
             </p>
             <ul className="divide-y divide-stone-100">
               {site.signals.map((s) => (

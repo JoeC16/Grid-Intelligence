@@ -7,7 +7,7 @@ layers see [DATA_MODEL.md](DATA_MODEL.md); for the scoring see [SCORING.md](SCOR
 
 | Piece | Where |
 |---|---|
-| Web app + API | Vercel project `grid-intelligence`, one FastAPI function (`app.py`) serving `/api/*` and the built web app |
+| Web app + API | Vercel project `grid-intelligence`. The web app and its start-up data (`public/`, written by `backend/export_static.py`) are served from Vercel's CDN; one FastAPI function (`app.py`) serves `/api/*` (site detail, Ask) and is the fallback for everything else |
 | Data | `data/grid.duckdb`, built by the pipeline and shipped with each deploy (never committed) |
 | Bronze snapshots | GitHub releases `snapshot-ukpn-<date>` (asset `bronze-ukpn-<date>.tar.gz`), never git |
 | Refresh + deploy | GitHub Actions: `.github/workflows/refresh.yml` (weekly, Mondays 05:17 UTC, and on demand) |
@@ -70,6 +70,7 @@ From a machine with the data built:
 ```bash
 uv run python -m pipeline.run        # build + checks (must pass)
 cd web && npm run build && cd ..
+uv run python -m backend.export_static   # web app + start-up JSON into public/ (CDN)
 vercel deploy --prod                 # needs a Vercel login or VERCEL_TOKEN
 ```
 
@@ -85,4 +86,5 @@ vercel deploy --prod                 # needs a Vercel login or VERCEL_TOKEN
 
 - The rate limit is per server instance (Vercel can run several), so it is a soft limit; the Anthropic spend limit is the hard one.
 - First request after a quiet spell takes ~6 s (the function loads the data). Later ones take under 0.5 s.
+- Straight after a deploy, the very first request to a newly added endpoint has twice returned "Not Found" (an older instance answering); a retry seconds later works. Check new endpoints twice before calling a deploy broken.
 - Snapshot history only grows when UKPN republishes; between publications the refresh stores nothing new.

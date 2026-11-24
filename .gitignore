@@ -28,3 +28,6 @@ web/dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Static deploy bundle (backend/export_static.py)
+public/

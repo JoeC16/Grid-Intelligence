@@ -122,7 +122,7 @@ Tasks:
 - Done when: the network can be shown on the map, the story clicks through end to end with sourced numbers, and the data model is documented.
 - Result: snapshots 2026-11-17 and 2026-11-23 (no UKPN dataset republished between them, so gold.changes is empty until the next publication). Story: 7 chapters built from gold, each with sources and a map focus.
 
-## Phase 11 — Production-ready for a pilot
+## Phase 11 — Production-ready for a pilot ✅
 Make it safe and repeatable to put in front of paying users: nothing open to abuse, data that refreshes and checks itself, a deploy that doesn't depend on one session, and the basics customers expect.
 
 - [x] Ask box protection: off unless an access code is configured (ASK_ACCESS_CODE); code required on every question; per-visitor rate limit; usage logged. Anthropic spend cap set in the Console (owner action).
@@ -132,6 +132,28 @@ Make it safe and repeatable to put in front of paying users: nothing open to abu
 - [x] Exports: ranking as CSV (with the weights used and sources); printable site report (save as PDF).
 - [x] Health endpoint (snapshot date, counts) for uptime monitoring; structured logs for AI questions (tool calls, tokens).
 - [x] Phone layout: side panel as a bottom sheet so the map stays visible.
-- [ ] Merge to main and deploy from main.
+- [x] Merge to main and deploy from main (PR #1; git-triggered Vercel builds switched off so only data-bearing deploys reach production).
 - [x] docs/OPERATIONS.md: secrets, the refresh workflow, how to deploy, roll back, and what to do when a check fails.
 - Done when: the Ask box can't be used without a code, a refresh can run end to end without this session, checks gate the deploy, and the code is on main.
+
+## Phase 12 — Second network operator: SP Energy Networks
+Turn "a UKPN tool" into a GB product. SP Energy Networks (SPEN) is the second operator: it covers central and southern Scotland (SPD) and Merseyside & North Wales (SPM).
+
+What the data supports (checked):
+- SPEN publishes on the same platform as UKPN (OpenDataSoft), CC BY 4.0, and needs an API key for records (catalogue public, records behind login, like UKPN).
+- It publishes the same standardised **Capacity Heatmap** as UKPN (`distribution-capacity-heatmaps-spd`, 390 rows; `-spm`, 871 rows) with the same core fields: name, voltage, GSP, BSP, lat/lon, demand firm capacity, maximum, available capacity, demand offers made/accepted and budget estimates.
+- Also: Network Scenario Headroom Reports (`spd-nshr-data-workbook`, `spm-nshr-data-workbook`), LTDS Table 3 system loads, Table 6 connection activity, substation naming tables, a GSP queue (`gsp-queue-position`).
+- No large demand list equivalent found yet.
+
+Part A — groundwork (no SPEN data needed):
+- [x] Shared OpenDataSoft downloader (`pipeline/adapters/ods.py`): exports with retries and a manifest per snapshot, key from env; used by the SPEN adapter.
+- [x] Multi-DNO everywhere: UI text and titles, filters by DNO and licence area, sources and attribution grouped per DNO, story and AI prompt worded for the networks covered, checks per DNO.
+- [x] Scoring across all networks covered (percentiles across GB primaries, not per DNO), documented.
+- [x] Cold start: precompute what the API loads so the first request after a quiet spell is fast.
+- Part A done: `adapters/ods.py` (UKPN's ukpyn download now shares its retry/flatten/manifest code); each adapter describes itself in a `DNOInfo` (name, region, areas, portal, licence, map view, check thresholds) written to a `dnos` table; the API, map attribution, footer, sources dialog, print report, Story and the Ask box's prompt and tools all read from it (no DNO named outside `adapters/`); a Network filter appears once there are two DNOs; checks run per DNO plus national ones (unique site IDs and GSP names); national ranking documented in docs/SCORING.md. Cold start: the function's own load is ~0.1 s, the wait was Python starting, so the start-up data (meta, sites, BSPs, GSPs, network, story) is now published as static JSON with the web app in `public/` (`backend/export_static.py`) and served from the CDN; only site detail and Ask call the function.
+
+Part B — SPEN adapter (needs SPEN_API_KEY):
+- [ ] Spike: download, profile, join test (heatmap ↔ NSHR ↔ LTDS ↔ Table 6 ↔ naming tables); add to docs/PROFILE.md.
+- [ ] `adapters/spen.py` implementing DNOAdapter: sites and headroom from the heatmap, queue from Table 6 / heatmap activity, 2030 headroom from the NSHR, topology from the heatmap's GSP/BSP fields.
+- [ ] Run both adapters; checks per DNO; deploy.
+- Done when: SPEN sites appear on the map with the same signals, sources and upstream view as UKPN, and the checks pass for both.

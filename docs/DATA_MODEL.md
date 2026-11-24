@@ -10,11 +10,11 @@ uv run python -m pipeline.run --refresh  # take a new bronze snapshot first
 ```
 
 ```
-UKPN Open Data Portal
-        │  adapters/ukpn.py (ukpyn)
+DNO open data portals (OpenDataSoft)
+        │  adapters/<dno>.py  (UKPN via ukpyn; others via adapters/ods.py)
         ▼
-BRONZE  data/bronze/ukpn/<YYYY-MM-DD>/*.parquet + _manifest.json     one folder per snapshot, never edited
-        │  adapters/ukpn.py → normalise.py → graph.py → score.py
+BRONZE  data/bronze/<dno>/<YYYY-MM-DD>/*.parquet + _manifest.json    one folder per DNO per snapshot, never edited
+        │  adapters/<dno>.py → normalise.py → graph.py → score.py  (scored nationally: all DNOs together)
         ▼
 SILVER  silver.sites / bsps / gsps   (one row per entity per snapshot)
         silver.nodes / edges         (the network graph, with source datasets)
@@ -56,7 +56,8 @@ snapshot each row came from.
 | `silver.edges` | edge | child_id → parent_id, kind (`site`, `bsp`) |
 
 Every silver snapshot is rebuilt from its own bronze folder with the current
-code, so history stays comparable when the method changes.
+code, so history stays comparable when the method changes. Every table carries
+a `dno` column; each DNO keeps its own snapshot dates.
 
 ## Gold
 
@@ -69,7 +70,8 @@ snapshot); `gold.*` are marts built on them.
 | `bsps`, `gsps`, `edges` | The network tree and roll-ups |
 | `headroom_scenarios` | DFES published headroom per site, every scenario and year |
 | `large_demand` | Large committed demand projects (GSP level) |
-| `field_sources` | Every field → dataset ID, publish date, licence, URL |
+| `field_sources` | Every field → DNO, dataset ID, publish date, licence, URL |
+| `dnos` | One row per network operator covered: name, region, licence areas, portal, licence, map view, check thresholds (from each adapter's `DNOInfo`). The app takes every DNO name and attribution from here. |
 | `gold.site_mart` | Site level: score, stuck MW, effective headroom, limiting level, **runs-out year** |
 | `gold.bsp_mart` | BSP level: the same measures + sites limited by the BSP, its own runs-out year, earliest under it |
 | `gold.gsp_mart` | GSP level: queue, **stuck MW** (its BSPs' stuck MW + directly fed primaries'), sites limited upstream, sites running out by 2030, earliest runs-out year, large demand, import utilisation |

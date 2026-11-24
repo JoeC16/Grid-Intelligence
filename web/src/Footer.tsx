@@ -1,7 +1,6 @@
 import { useState } from "react";
-import type { Meta } from "./api";
+import { dataCredit, type DnoInfo, type Meta } from "./api";
 
-const CC_BY = "https://creativecommons.org/licenses/by/4.0/";
 const OGL = "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/";
 
 // What each field means to a reader, for the sources list.
@@ -17,15 +16,53 @@ const FIELD_LABELS: Record<string, string> = {
   large_demand: "large demand projects",
 };
 
-function SourcesDialog({ meta, onClose }: { meta: Meta; onClose: () => void }) {
+function DnoSources({ dno, meta }: { dno: DnoInfo; meta: Meta }) {
   // One row per dataset, with what the app uses it for.
   const byDataset = new Map<string, { url: string; date: string; licence: string; uses: Set<string> }>();
-  for (const s of meta.sources) {
+  for (const s of meta.sources.filter((x) => x.dno === dno.code)) {
     const row = byDataset.get(s.dataset_id) ?? { url: s.url, date: s.publish_date, licence: s.licence, uses: new Set<string>() };
     const label = FIELD_LABELS[s.field];
     if (label) row.uses.add(label);
     byDataset.set(s.dataset_id, row);
   }
+  return (
+    <>
+      <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">{dno.portal_name}</h3>
+      <p className="mt-1 text-xs text-stone-600">
+        Contains data from{" "}
+        <a className="underline" href={dno.portal_url} target="_blank" rel="noreferrer">{dno.name}</a>, licensed under{" "}
+        <a className="underline" href={dno.licence_url} target="_blank" rel="noreferrer">{dno.licence}</a>. Changes: datasets joined,
+        aggregated per substation and scored by Grid Intelligence. {dno.name} does not endorse this tool.
+      </p>
+      <table className="mt-2 w-full text-left text-xs">
+        <thead className="text-stone-500">
+          <tr>
+            <th className="py-1 pr-3 font-medium">Dataset</th>
+            <th className="py-1 pr-3 font-medium">Used for</th>
+            <th className="py-1 pr-3 font-medium">Published</th>
+            <th className="py-1 font-medium">Licence</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-stone-100">
+          {[...byDataset].map(([id, r]) => (
+            <tr key={id}>
+              <td className="py-1.5 pr-3">
+                <a className="font-mono text-stone-800 underline decoration-stone-300 underline-offset-2" href={r.url} target="_blank" rel="noreferrer">
+                  {id}
+                </a>
+              </td>
+              <td className="py-1.5 pr-3 text-stone-600">{[...r.uses].join(", ")}</td>
+              <td className="whitespace-nowrap py-1.5 pr-3 tabular-nums text-stone-600">{r.date}</td>
+              <td className="whitespace-nowrap py-1.5 text-stone-600">{r.licence || "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+function SourcesDialog({ meta, onClose }: { meta: Meta; onClose: () => void }) {
   const year = new Date().getFullYear();
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 sm:items-center" onClick={onClose}>
@@ -43,36 +80,9 @@ function SourcesDialog({ meta, onClose }: { meta: Meta; onClose: () => void }) {
         </div>
         <p className="mt-2 text-sm text-stone-700">{meta.disclaimer}</p>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">UK Power Networks Open Data</h3>
-        <p className="mt-1 text-xs text-stone-600">
-          Contains data from UK Power Networks, licensed under{" "}
-          <a className="underline" href={CC_BY} target="_blank" rel="noreferrer">CC BY 4.0</a>. Changes: datasets joined, aggregated per
-          substation and scored by Grid Intelligence. UK Power Networks does not endorse this tool.
-        </p>
-        <table className="mt-2 w-full text-left text-xs">
-          <thead className="text-stone-500">
-            <tr>
-              <th className="py-1 pr-3 font-medium">Dataset</th>
-              <th className="py-1 pr-3 font-medium">Used for</th>
-              <th className="py-1 pr-3 font-medium">Published</th>
-              <th className="py-1 font-medium">Licence</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {[...byDataset].map(([id, r]) => (
-              <tr key={id}>
-                <td className="py-1.5 pr-3">
-                  <a className="font-mono text-stone-800 underline decoration-stone-300 underline-offset-2" href={r.url} target="_blank" rel="noreferrer">
-                    {id}
-                  </a>
-                </td>
-                <td className="py-1.5 pr-3 text-stone-600">{[...r.uses].join(", ")}</td>
-                <td className="whitespace-nowrap py-1.5 pr-3 tabular-nums text-stone-600">{r.date}</td>
-                <td className="whitespace-nowrap py-1.5 text-stone-600">{r.licence || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {meta.dnos.map((d) => (
+          <DnoSources key={d.code} dno={d} meta={meta} />
+        ))}
 
         <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">Place names (Ask)</h3>
         <p className="mt-1 text-xs text-stone-600">
@@ -89,7 +99,7 @@ function SourcesDialog({ meta, onClose }: { meta: Meta; onClose: () => void }) {
   );
 }
 
-function TermsDialog({ disclaimer, onClose }: { disclaimer: string; onClose: () => void }) {
+function TermsDialog({ disclaimer, credit, onClose }: { disclaimer: string; credit: string; onClose: () => void }) {
   const h = "mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500";
   const p = "mt-1 text-xs leading-relaxed text-stone-700";
   return (
@@ -124,7 +134,7 @@ function TermsDialog({ disclaimer, onClose }: { disclaimer: string; onClose: () 
         </p>
         <h3 className={h}>Data and licences</h3>
         <p className={p}>
-          Contains data from UK Power Networks (CC BY 4.0), OS Open Names (Open Government Licence v3.0) and OpenStreetMap
+          Contains data from {credit || "the network operators"}, OS Open Names (Open Government Licence v3.0) and OpenStreetMap
           contributors (ODbL). See Sources &amp; licences for every dataset and its publish date. Network operators do not endorse
           this service.
         </p>
@@ -146,8 +156,7 @@ export default function Footer({ meta }: { meta: Meta | null }) {
     <footer className="z-20 flex print:hidden flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-stone-200 bg-white px-4 py-1.5 text-[11px] text-stone-500">
       <span className="font-medium text-stone-700">Published headroom is indicative and not guaranteed.</span>
       <span>
-        Contains data from UK Power Networks (
-        <a className="underline" href={CC_BY} target="_blank" rel="noreferrer">CC BY 4.0</a>) · OS Open Names (OGL v3) · © OpenStreetMap contributors
+        Contains data from {dataCredit(meta?.dnos) || "network operators' open data"} · OS Open Names (OGL v3) · © OpenStreetMap contributors
       </span>
       {meta && (
         <button type="button" onClick={() => setOpen(true)} className="font-medium text-stone-700 underline decoration-stone-300 underline-offset-2 hover:text-stone-900">
@@ -158,7 +167,7 @@ export default function Footer({ meta }: { meta: Meta | null }) {
         Terms
       </button>
       {open && meta && <SourcesDialog meta={meta} onClose={() => setOpen(false)} />}
-      {terms && <TermsDialog disclaimer={meta?.disclaimer ?? "Published headroom is indicative and not guaranteed."} onClose={() => setTerms(false)} />}
+      {terms && <TermsDialog disclaimer={meta?.disclaimer ?? "Published headroom is indicative and not guaranteed."} credit={dataCredit(meta?.dnos)} onClose={() => setTerms(false)} />}
     </footer>
   );
 }
