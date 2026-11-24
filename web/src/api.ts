@@ -324,6 +324,7 @@ export interface StoryChapter {
     select?: string;
     highlight?: string[];
     areas?: string[];
+    node?: string; // open this upper-level node's what-if card
   };
 }
 
@@ -384,3 +385,27 @@ export interface GspRow {
 }
 
 export const fetchGsps = () => staticOrApi<{ count: number; gsps: GspRow[] }>("gsps", "/gsps");
+
+/** One upper-level node in the unlock planner (gold.unlock_mart). new_/served_/open_<MW> are gains from adding that many MW. */
+export interface UnlockNode {
+  bsp_id: string;
+  dno: string;
+  name: string;
+  lat: number | null;
+  lon: number | null;
+  sites: number;
+  headroom_mw: number;
+  queue_mw: number;
+  node_stuck_mw: number;
+  spare_mw: number;
+  needs_local_mw: number;
+  mw_to_first_open: number | null;
+  load_mw: number;
+  rank_new_50: number | null;
+  rank_queue_50: number | null;
+  [key: string]: string | number | null;
+}
+
+export const fetchUnlock = (country: string) =>
+  staticOrApi<{ country: string; count: number; steps: number[]; load_mw: number; nodes: UnlockNode[]; sources: Source[]; caveat: string }>(
+    `unlock-${country}`, `/unlock?country=${country}`);

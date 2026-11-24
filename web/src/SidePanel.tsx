@@ -23,6 +23,8 @@ interface Props {
   error: string | null;
   onClose: () => void;
   dnos?: DnoInfo[];
+  /** Open the what-if card of an upper-level node. */
+  onOpenNode?: (bspId: string) => void;
 }
 
 const fmt = (v: number | null, digits = 1) =>
@@ -99,7 +101,7 @@ function Row({ label, value, unit }: { label: string; value: number | null; unit
   );
 }
 
-function UpstreamSection({ site, onSelect }: { site: SiteDetail; onSelect: (id: string) => void }) {
+function UpstreamSection({ site, onSelect, onOpenNode }: { site: SiteDetail; onSelect: (id: string) => void; onOpenNode?: (bspId: string) => void }) {
   const u = site.upstream;
   const b = u.bsp;
   const g = u.gsp;
@@ -128,6 +130,12 @@ function UpstreamSection({ site, onSelect }: { site: SiteDetail; onSelect: (id: 
                 <Row label={`Queue under it (${b.site_count} ${es ? "busbars" : "sites"})`} value={b.queue_mw} unit="MW" />
                 <Row label="Left after queue" value={b.headroom_after_queue_mw} unit="MW" />
                 {es && b.free_bays != null && <p className="text-[11px] text-stone-500">{b.free_bays} free bays at the node</p>}
+                {onOpenNode && (
+                  <button type="button" onClick={() => onOpenNode(b.bsp_id)}
+                    className="mt-1 text-[11px] font-medium text-stone-700 underline decoration-stone-300 underline-offset-2 hover:text-stone-900">
+                    What if capacity were added at this {level}? →
+                  </button>
+                )}
                 {es && (
                   <p className="text-[11px] text-stone-500">
                     Link as published by the distributor ("nudo de afección" in the CNMC generation map).
@@ -191,7 +199,7 @@ function UpstreamSection({ site, onSelect }: { site: SiteDetail; onSelect: (id: 
   );
 }
 
-export default function SidePanel({ site, headline, weights, colocated, onSelect, loading, error, onClose, dnos }: Props) {
+export default function SidePanel({ site, headline, weights, colocated, onSelect, loading, error, onClose, dnos, onOpenNode }: Props) {
   return (
     <aside className="flex h-full w-full flex-col overflow-hidden rounded-t-xl bg-white shadow-xl sm:w-[380px] sm:rounded-none print:h-auto print:w-full print:overflow-visible print:rounded-none print:shadow-none">
       <div className="flex items-start justify-between border-b border-stone-200 px-5 py-4">
@@ -306,7 +314,7 @@ export default function SidePanel({ site, headline, weights, colocated, onSelect
                 </p>
               </div>
             )}
-            {(site.upstream.bsp || site.upstream.gsp) && <UpstreamSection site={site} onSelect={onSelect} />}
+            {(site.upstream.bsp || site.upstream.gsp) && <UpstreamSection site={site} onSelect={onSelect} onOpenNode={onOpenNode} />}
 
             <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-stone-500">Signals</h3>
             <p className="mt-1 text-[11px] text-stone-500">

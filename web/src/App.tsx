@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { monthLabel, networkNames, upperLevel, fetchBsps, fetchGsps, fetchMeta, fetchNetwork, fetchOperators, fetchSite, fetchSites, fetchStory, type OperatorRow, type BspRow, type GspRow, type StoryChapter, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON, type Source } from "./api";
+import { fetchUnlock, type UnlockNode, monthLabel, networkNames, upperLevel, fetchBsps, fetchGsps, fetchMeta, fetchNetwork, fetchOperators, fetchSite, fetchSites, fetchStory, type OperatorRow, type BspRow, type GspRow, type StoryChapter, type Filters, type Meta, type QueryResult, type SiteDetail, type SiteProps, type SitesGeoJSON, type Source } from "./api";
 import AskPanel from "./AskPanel";
 import { gradientCss, rampFor, scoreColor, UNSCORED, type Ramp } from "./colors";
 import { LoadInput, Segmented, WeightsPanel } from "./Controls";
@@ -11,13 +11,14 @@ import BspList from "./BspList";
 import GspCard from "./GspCard";
 import StoryPanel from "./StoryPanel";
 import NodeCard from "./NodeCard";
+import UnlockPanel from "./UnlockPanel";
 import OperatorList from "./OperatorList";
 import { colourPosition, describe, rankByScore, rankBySiteBsp, rankByStuck, rankForLoad, type Mode, type Ranking } from "./ranking";
 import type { Weights } from "./scoring";
 import SidePanel, { type Headline } from "./SidePanel";
 
 const INITIAL_FILTERS: Filters = { licenceAreas: [], voltages: [], minScore: 0 };
-type Panel = "none" | "ranking" | "weights" | "ask" | "story" | "operators";
+type Panel = "none" | "ranking" | "weights" | "ask" | "story" | "operators" | "unlock";
 
 const mw = (v: number | null | undefined) =>
   v == null ? "—" : v.toLocaleString("en-GB", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
@@ -77,7 +78,11 @@ export default function App() {
   const [showNetwork, setShowNetwork] = useState(false);
   const [networks, setNetworks] = useState<Record<string, GeoJSON.FeatureCollection>>({});
   const [bspSources, setBspSources] = useState<Record<string, Source | null>>({});
-  const [selectedNode, setSelectedNode] = useState<string | null>(null); // upper-level node with no site (Spain)
+  const [selectedNode, setSelectedNode] = useState<string | null>(null); // upper-level node card (what-if)
+  // Phase 15: unlock planner
+  const [unlock, setUnlock] = useState<Record<string, { nodes: UnlockNode[]; steps: number[]; load: number; sources: Source[]; caveat: string }>>({});
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [whatIfIds, setWhatIfIds] = useState<string[]>([]);
   const [gspRows, setGspRows] = useState<GspRow[]>([]);
   const [selectedGsp, setSelectedGsp] = useState<string | null>(null);
   // Phase 13: one country at a time (GB, ES); everything is ranked within the country shown.
@@ -227,6 +232,15 @@ export default function App() {
       .catch((e) => setStoryError(String(e)));
   }, [panel, story, country]);
 
+  // Load a country's unlock planner when its panel (or a node card) first needs it.
+  useEffect(() => {
+    if (!(panel === "unlock" || selectedNode) || unlock[country]) return;
+    setUnlockError(null);
+    fetchUnlock(country)
+      .then((d) => setUnlock((u) => ({ ...u, [country]: { nodes: d.nodes, steps: d.steps, load: d.load_mw, sources: d.sources, caveat: d.caveat } })))
+      .catch((e) => setUnlockError(String(e)));
+  }, [panel, selectedNode, unlock, country]);
+
   // Load a country's distributors when that panel first opens.
   useEffect(() => {
     if (panel !== "operators" || operators[country]) return;
@@ -246,6 +260,7 @@ export default function App() {
     setShowNetwork(f.network);
     setSelectedGsp(null);
     setSelectedId(f.select ?? null);
+    setSelectedNode(f.node ?? null);
     setStoryHighlight(f.highlight ?? []);
     setFilters({ ...INITIAL_FILTERS, licenceAreas: f.areas ?? [] });
     setFlyTo({ center: f.center, zoom: f.zoom, key: Date.now() });
@@ -445,6 +460,11 @@ export default function App() {
                 Network
               </ToolbarButton>
             )}
+            {hasTopology && (
+              <ToolbarButton active={panel === "unlock"} onClick={() => togglePanel("unlock")}>
+                Unlock
+              </ToolbarButton>
+            )}
             {hasOperators && (
               <ToolbarButton active={panel === "operators"} onClick={() => togglePanel("operators")}>
                 Distributors
@@ -475,7 +495,7 @@ export default function App() {
           display={display}
           visible={visible}
           selectedId={selectedId}
-          highlightIds={panel === "ask" ? askIds : panel === "story" ? storyHighlight : panel === "operators" ? operatorIds : []}
+          highlightIds={selectedNode && !selectedId ? whatIfIds : panel === "ask" ? askIds : panel === "story" ? storyHighlight : panel === "operators" ? operatorIds : []}
           topology={topology}
           network={showNetwork ? networkData : null}
           flyTo={flyTo}
@@ -550,6 +570,27 @@ export default function App() {
             <StoryPanel chapters={story} index={storyIndex} onIndex={setStoryIndex} error={storyError} onClose={() => setPanel("none")} />
           </div>
         )}
+        {panel === "unlock" && (
+          <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36 print:hidden">
+            <UnlockPanel
+              nodes={unlock[country]?.nodes ?? null}
+              steps={unlock[country]?.steps ?? [10, 25, 50, 100, 200]}
+              loadMw={unlock[country]?.load ?? 10}
+              level={level}
+              caveat={unlock[country]?.caveat ?? ""}
+              sources={unlock[country]?.sources ?? []}
+              selectedNode={selectedNode}
+              error={unlockError}
+              onSelect={(n) => {
+                setSelectedId(null);
+                setSelectedGsp(null);
+                setSelectedNode(n.bsp_id);
+                if (n.lat != null && n.lon != null) setFlyTo({ center: [n.lon, n.lat], zoom: 9.5, key: Date.now() });
+              }}
+              onClose={() => setPanel("none")}
+            />
+          </div>
+        )}
         {panel === "operators" && (
           <div className="pointer-events-none absolute bottom-3 left-3 top-3 z-10 flex sm:bottom-36 print:hidden">
             <OperatorList
@@ -619,6 +660,9 @@ export default function App() {
                   setSelectedId(id);
                 }}
                 onClose={() => setSelectedNode(null)}
+                onWhatIf={setWhatIfIds}
+                loadMw={unlock[country]?.load ?? 10}
+                caveat={unlock[country]?.caveat}
               />
             </div>
           );
@@ -640,6 +684,10 @@ export default function App() {
               error={error}
               onClose={() => setSelectedId(null)}
               dnos={countryDnos}
+              onOpenNode={(id) => {
+                setSelectedId(null);
+                setSelectedNode(id);
+              }}
             />
           </div>
         )}

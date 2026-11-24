@@ -41,6 +41,7 @@ def endpoints(client: TestClient) -> dict[str, str]:
         out[f"story-{c['code']}"] = f"/story?country={c['code']}"
         out[f"operators-{c['code']}"] = f"/operators?country={c['code']}"
         out[f"network-{c['code']}"] = f"/network?country={c['code']}"
+        out[f"unlock-{c['code']}"] = f"/unlock?country={c['code']}"
     return out
 
 

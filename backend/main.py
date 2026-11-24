@@ -87,7 +87,7 @@ def _load() -> dict[str, pd.DataFrame]:
             "large_demand": con.execute("SELECT * FROM large_demand").df(),
             **{f"gold_{t}": con.execute(f"SELECT * FROM gold.{t}").df()
                for t in ("gsp_mart", "bsp_mart", "headroom_timeline", "large_demand_by_year", "changes",
-                         "operator_mart")},
+                         "operator_mart", "unlock_mart", "unlock_curve")},
             "snapshots": sorted(con.execute("SELECT DISTINCT snapshot_date FROM silver.sites").df()["snapshot_date"]),
             "snapshots_by_dno": con.execute(
                 "SELECT dno, list(DISTINCT snapshot_date ORDER BY snapshot_date) AS dates FROM silver.sites GROUP BY 1"
@@ -577,6 +577,28 @@ def story(country: str = "GB") -> dict:
     else:
         out = build_story_es(data, _source, dnos[0])
     return _jsonable(out | {"country": country})
+
+
+UNLOCK_CAVEAT = (
+    "Screening, not an engineering study: published headroom is indicative and not additive, there is no "
+    "power-flow model, and no reinforcement costs are published. Queue beyond a site's own headroom also needs "
+    "a local upgrade."
+)
+
+
+@app.get("/unlock")
+def list_unlock(country: str = "GB") -> dict:
+    """Best next moves: per upper-level node (GB BSP, Spanish transmission node), what added MW unlocks."""
+    full = _load()
+    country = _check_country(full, country)
+    data = _country_data(full, country)
+    m = data["gold_unlock_mart"]
+    rows = [{k: _clean(v) for k, v in r.items()} for r in m.to_dict("records")]
+    dnos = list(data["dnos"]["code"])
+    sources = [x for d in dnos for x in (_source(d, "bsp_headroom_mw"), _source(d, "queue_mw"), _source(d, "demand_headroom_mw")) if x]
+    from pipeline.unlock import LOAD_MW, STEPS
+    return {"country": country, "count": len(rows), "steps": [s for s in STEPS if s], "load_mw": LOAD_MW,
+            "nodes": rows, "sources": list({s["dataset_id"]: s for s in sources}.values()), "caveat": UNLOCK_CAVEAT}
 
 
 @app.get("/operators")

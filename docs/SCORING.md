@@ -217,6 +217,40 @@ some. Northfleet East is first: 422.2 MW queued under it against 95.2 MW of
 published headroom, 327.0 MW stuck. BSPs with no published headroom aren't
 ranked.
 
+## Unlock planner (best next moves)
+
+Where would added capacity at an upper-level node (a GB BSP, a Spanish
+transmission node) unlock the most demand under it? `pipeline/unlock.py`,
+`gold.unlock_mart` (one row per node) and `gold.unlock_curve` (node × MW added);
+the web app's what-if slider repeats the same maths (`web/src/unlock.ts`;
+checked equal on every node and step).
+
+For a node with published headroom H and queue Q under it, adding A MW:
+
+| Measure | Formula |
+|---|---|
+| Node headroom left | U = H + A − Q |
+| Queue served (node alone) | min(A, max(Q − N − H, 0)); N = queue beyond the sites' *own* headroom, which also needs a local upgrade |
+| Queue served with local work | min(A, max(Q − H, 0)) |
+| New capacity | min(spare, max(U, 0)); spare = Σ max(site headroom − site queue, 0) |
+| Sites open for a load L | sites with min(site after its queue, U) ≥ L (L = 10 MW by default) |
+| MW to first opening | Q + L − H, if any site has L of its own headroom; otherwise it needs a local upgrade too |
+
+- **Rankings use the gain** from adding A MW (value at A minus value at 0), so a
+  node that already has room doesn't rank as a place to add more. Ties at +50 MW
+  are broken by sites opened, then by the gain at +100 MW.
+- Shared node capacity is never double-counted: new capacity is the lower of the
+  sites' spare and what is left at the node. All queued demand counts as ahead
+  of new demand.
+- Two goals: **open new capacity** (room beyond today's queue) and **serve the
+  queue** (customers already waiting only on the node). They differ: Northfleet
+  East has 327 MW queued beyond its headroom, but 306.6 MW of it is also beyond
+  its primaries' own headroom, so a BSP upgrade alone serves about 20 MW.
+- Limits: a screening tool, not an engineering study. Published headroom is
+  indicative and not additive, there is no power-flow model, and no
+  reinforcement costs are published (the UKPN heatmap's "budget estimates" are
+  quotes given to customers, in MW and counts, not £).
+
 ## Changing the scoring
 
 Edit `config/weights.yaml`, then:

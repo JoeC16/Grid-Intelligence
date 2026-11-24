@@ -79,6 +79,8 @@ snapshot); `gold.*` are marts built on them.
 | `gold.headroom_timeline` | Per scenario and forecast year: primaries below zero, total published headroom |
 | `gold.large_demand_by_year` | Large demand projects and MVA per GSP, technology and application year |
 | `gold.changes` | Latest vs previous snapshot, per DNO: every measure that moved, per site and BSP (empty until a dataset is republished) |
+| `gold.unlock_mart` | One row per upper-level node (GB BSP, Spanish transmission node) with published headroom: queue beyond its headroom, spare at its sites, queue needing local work, MW to the first 10 MW opening, and the gain in queue served / new capacity / sites open from adding 10–350 MW; ranks for both goals at +50 MW (docs/SCORING.md) |
+| `gold.unlock_curve` | Node × MW added: queue served (node alone and with local work), new capacity, sites open |
 | `gold.operator_mart` | One row per distribution network operator (Spain: every distributor in the CNMC data; GB: the DNO): busbars/sites, share at zero published headroom, MW published headroom, MW waiting, MW stuck, MW taken, most stuck site, rank by stuck MW within the country |
 
 Definitions:
