@@ -3,8 +3,9 @@
 Usage:  uv run python -m pipeline.checks     (exit code 1 if any check fails)
 
 Thresholds are set just below today's values (docs/PROFILE.md), so a format
-change or a broken join at UKPN shows up as a failed check instead of quietly
-wrong numbers. DNO-agnostic: works on the normalised tables and bronze manifests.
+change or a broken join at a DNO shows up as a failed check instead of quietly
+wrong numbers. DNO-agnostic: site checks run once per DNO in the `dnos` table, using
+its own thresholds (DNOInfo in pipeline/adapters/), plus national checks.
 """
 
 from __future__ import annotations
@@ -37,15 +38,15 @@ def _share(n: int, d: int) -> float:
     return n / d if d else 0.0
 
 
-def check_tables(t: dict[str, pd.DataFrame]) -> list[Check]:
-    s, b, fs, sc = t["sites"], t["bsps"], t["field_sources"], t["site_scores"]
+def check_dno(dno: dict, s: pd.DataFrame, b: pd.DataFrame, fs: pd.DataFrame) -> list[Check]:
+    """Checks on one DNO's rows. `dno` is its row of the dnos table."""
     out: list[Check] = []
-    add = lambda name, ok, detail: out.append(Check(name, bool(ok), detail))  # noqa: E731
+    tag = dno["code"]
+    add = lambda name, ok, detail: out.append(Check(f"{tag}: {name}", bool(ok), detail))  # noqa: E731
 
-    add("sites present", len(s) >= 900, f"{len(s)} sites (expect ≥ 900)")
-    add("site IDs unique", not s["site_id"].duplicated().any(), "no duplicate site_id")
-    floc = _share((~s["site_id"].str.startswith("UKPN-MRID-")).sum(), len(s))
-    add("sites matched to a FLOC", floc >= 0.99, f"{floc:.1%} (expect ≥ 99%)")
+    add("sites present", len(s) >= dno["min_sites"], f"{len(s)} sites (expect ≥ {dno['min_sites']})")
+    matched_id = _share((~s["site_id"].str.startswith(dno["fallback_id_prefix"])).sum(), len(s))
+    add("sites matched to a stable ID", matched_id >= 0.99, f"{matched_id:.1%} (expect ≥ 99%)")
     in_box = s["lat"].between(*UK_BOX["lat"]) & s["lon"].between(*UK_BOX["lon"])
     add("locations present and in Great Britain", _share(in_box.sum(), len(s)) >= 0.99, f"{_share(in_box.sum(), len(s)):.1%} (expect ≥ 99%)")
     scorable = s["scorable"].sum()
@@ -63,24 +64,40 @@ def check_tables(t: dict[str, pd.DataFrame]) -> list[Check]:
     add("scorable sites with a known upstream path", _share(path.sum(), len(sc_sites)) >= 0.95,
         f"{_share(path.sum(), len(sc_sites)):.1%} (direct-fed or BSP headroom published; expect ≥ 95%)")
 
-    scores = sc["score"].dropna()
-    add("scores in 0–100", scores.between(0, 100).all() and len(scores) >= 0.98 * len(sc),
-        f"{len(scores)} scores, min {scores.min():.1f}, max {scores.max():.1f}")
-    add("rank 1 exists", (sc["rank"] == 1).any(), "a top-ranked site exists")
-
     dates_ok = fs["publish_date"].astype(str).str.match(r"^\d{4}-\d{2}-\d{2}$")
     future = pd.to_datetime(fs["publish_date"], errors="coerce") > pd.Timestamp(date.today())
     add("every field has a dataset, publish date and licence",
-        fs["dataset_id"].notna().all() and dates_ok.all() and fs["licence"].fillna("").ne("").all() and not future.any(),
+        len(fs) > 0 and fs["dataset_id"].notna().all() and dates_ok.all()
+        and fs["licence"].fillna("").ne("").all() and not future.any(),
         f"{len(fs)} field sources checked")
     return out
 
 
-def check_bronze(dno: str = "UKPN", root: Path = bronze.BRONZE_ROOT) -> list[Check]:
+def check_tables(t: dict[str, pd.DataFrame]) -> list[Check]:
+    """Per-DNO checks for every DNO in the dnos table, then national ones."""
+    s, b, fs, sc, g = t["sites"], t["bsps"], t["field_sources"], t["site_scores"], t["gsps"]
+    out: list[Check] = []
+    for dno in t["dnos"].to_dict("records"):
+        code = dno["code"]
+        out += check_dno(dno, s[s["dno"] == code], b[b["dno"] == code], fs[fs["dno"] == code])
+    unknown = sorted(set(s["dno"]) - set(t["dnos"]["code"]))
+    add = lambda name, ok, detail: out.append(Check(name, bool(ok), detail))  # noqa: E731
+    add("every site's DNO is described", not unknown, f"unknown: {unknown}" if unknown else f"{len(t['dnos'])} DNO(s)")
+    add("site IDs unique", not s["site_id"].duplicated().any(), "no duplicate site_id across DNOs")
+    add("GSP names unique", not g["gsp"].duplicated().any(), "no GSP name used by two DNOs")
+
+    scores = sc["score"].dropna()
+    add("scores in 0–100", scores.between(0, 100).all() and len(scores) >= 0.98 * len(sc),
+        f"{len(scores)} scores, min {scores.min():.1f}, max {scores.max():.1f}")
+    add("rank 1 exists", (sc["rank"] == 1).any(), "a top-ranked site exists")
+    return out
+
+
+def check_bronze(dno: str, root: Path = bronze.BRONZE_ROOT) -> list[Check]:
     """Each dataset's row count vs the previous snapshot."""
     snaps = bronze.snapshots(dno, root)
     if len(snaps) < 2:
-        return [Check("row counts vs previous snapshot", True, "only one snapshot: nothing to compare")]
+        return [Check(f"{dno}: row counts vs previous snapshot", True, "only one snapshot: nothing to compare")]
     prev = json.loads((snaps[-2] / "_manifest.json").read_text())
     last = json.loads((snaps[-1] / "_manifest.json").read_text())
     out = []
@@ -88,21 +105,29 @@ def check_bronze(dno: str = "UKPN", root: Path = bronze.BRONZE_ROOT) -> list[Che
         if ds not in prev or not prev[ds].get("rows"):
             continue
         change = (m["rows"] - prev[ds]["rows"]) / prev[ds]["rows"]
-        out.append(Check(f"rows: {ds}", abs(change) <= ROW_CHANGE_LIMIT,
+        out.append(Check(f"{dno}: rows: {ds}", abs(change) <= ROW_CHANGE_LIMIT,
                          f"{prev[ds]['rows']:,} → {m['rows']:,} ({change:+.0%}, limit ±{ROW_CHANGE_LIMIT:.0%})"))
     missing = sorted(set(prev) - set(last))
-    out.append(Check("no dataset missing from the latest snapshot", not missing, f"missing: {missing}" if missing else "all present"))
+    out.append(Check(f"{dno}: no dataset missing from the latest snapshot", not missing, f"missing: {missing}" if missing else "all present"))
     return out
 
 
 def run(db_path: Path = DB_PATH) -> list[Check]:
     with duckdb.connect(str(db_path), read_only=True) as con:
-        t = {n: con.execute(f"SELECT * FROM {n}").df() for n in ("sites", "bsps", "field_sources", "site_scores")}
-        snaps = con.execute("SELECT snapshot_date, count(*) n FROM silver.sites GROUP BY 1 ORDER BY 1").df()
-    checks = check_tables(t) + check_bronze()
-    latest_rows = int(snaps["n"].iloc[-1]) if len(snaps) else 0
-    checks.append(Check("silver latest snapshot matches the current tables", latest_rows == len(t["sites"]),
-                        f"silver {latest_rows} rows vs sites {len(t['sites'])}"))
+        t = {n: con.execute(f"SELECT * FROM {n}").df()
+             for n in ("sites", "bsps", "gsps", "field_sources", "site_scores", "dnos")}
+        # Each DNO's latest silver snapshot (DNOs can be on different snapshot dates).
+        latest = con.execute("""
+            SELECT dno, count(*) n FROM silver.sites
+            WHERE (dno, snapshot_date) IN (SELECT dno, max(snapshot_date) FROM silver.sites GROUP BY 1)
+            GROUP BY 1""").df().set_index("dno")["n"]
+    checks = check_tables(t)
+    for code in t["dnos"]["code"]:
+        checks += check_bronze(code)
+    current = t["sites"]["dno"].value_counts()
+    ok = all(int(latest.get(d, 0)) == int(n) for d, n in current.items())
+    checks.append(Check("silver latest snapshot matches the current tables", ok,
+                        ", ".join(f"{d}: silver {int(latest.get(d, 0))} vs sites {int(n)}" for d, n in current.items())))
     return checks
 
 

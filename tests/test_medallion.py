@@ -96,3 +96,26 @@ def test_network_geojson():
     n = TestClient(app).get("/network").json()
     kinds = {f["properties"]["kind"] for f in n["features"]}
     assert kinds == {"edge_site", "edge_bsp", "node_bsp", "node_gsp"}
+
+
+def test_story_wording_names_every_network():
+    from backend.story import _who, _whose, _whole_view
+    one = [{"name": "UK Power Networks", "map_center": [0.35, 51.55], "map_zoom": 7.6}]
+    two = one + [{"name": "SP Energy Networks", "map_center": [-3.5, 54.5], "map_zoom": 7.0}]
+    assert _who(one) == "UK Power Networks" and _whose(one) == "UK Power Networks'"
+    assert _who(two) == "UK Power Networks and SP Energy Networks" and _whose(two) == "The network operators'"
+    assert _whole_view(one) == {"center": [0.35, 51.55], "zoom": 7.6} and _whole_view(two)["zoom"] < 7
+
+
+@pytest.mark.skipif(not DB_PATH.exists(), reason="needs data/grid.duckdb")
+def test_static_export_matches_api(tmp_path):
+    import json
+    from backend import export_static
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html>")
+    export_static.export(tmp_path / "public", dist)
+    client = TestClient(app)
+    for name, path in export_static.ENDPOINTS.items():
+        assert json.loads((tmp_path / "public" / "data" / f"{name}.json").read_text()) == client.get(path).json()
+    assert (tmp_path / "public" / "index.html").is_file()

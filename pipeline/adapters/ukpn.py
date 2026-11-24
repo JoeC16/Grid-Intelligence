@@ -13,16 +13,15 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import os
 import re
-from datetime import datetime, timezone
 from functools import cache
 from pathlib import Path
 
 import pandas as pd
 
 from .. import bronze
-from .base import DNOAdapter, Source
+from . import ods
+from .base import DNOAdapter, DNOInfo, Source
 
 DNO = "UKPN"
 PORTAL = "https://ukpowernetworks.opendatasoft.com/explore/dataset/"
@@ -101,75 +100,22 @@ BSP_ALIASES = {
     "Great Yarmouth Grid 33": "GT Yarmouth Grid 33kV",
 }
 
-RETRIES = 6
-
-
 # ---------------------------------------------------------------- download --
 
 
-async def _with_retry(label, fn, *args, **kwargs):
-    """The egress path to the portal drops connections intermittently."""
-    for attempt in range(1, RETRIES + 1):
-        try:
-            return await fn(*args, **kwargs)
-        except Exception as exc:  # noqa: BLE001 - network flakiness, retry anything
-            if attempt == RETRIES:
-                raise
-            wait = 2**attempt
-            print(f"  {label}: {type(exc).__name__}, retry {attempt}/{RETRIES - 1} in {wait}s")
-            await asyncio.sleep(wait)
-
-
-def _flatten(df: pd.DataFrame) -> pd.DataFrame:
-    """Turn nested dict/list columns into flat columns parquet can store."""
-    for col in list(df.columns):
-        sample = df[col].dropna()
-        if sample.empty:
-            continue
-        first = sample.iloc[0]
-        if isinstance(first, dict):
-            if {"lat", "lon"} <= set(first):
-                df[f"{col}_lat"] = df[col].map(lambda v: v.get("lat") if isinstance(v, dict) else None)
-                df[f"{col}_lon"] = df[col].map(lambda v: v.get("lon") if isinstance(v, dict) else None)
-            df[col] = df[col].map(lambda v: json.dumps(v) if v is not None else None)
-        elif isinstance(first, list):
-            df[col] = df[col].map(lambda v: json.dumps(v) if v is not None else None)
-    return df
-
-
-async def _download_one(client, dataset_id: str, out_dir: Path) -> dict:
-    meta = await _with_retry(f"{dataset_id} meta", client.get_dataset, dataset_id)
-    metas = (meta.model_dump().get("metas") or {}).get("default") or {}
-    raw = await _with_retry(f"{dataset_id} export", client.export_data, dataset_id, format="json")
-    df = _flatten(pd.DataFrame(json.load(io.BytesIO(raw))))
-    df.to_parquet(out_dir / f"{dataset_id}.parquet", index=False)
-    print(f"  {dataset_id}: {len(df):,} rows")
-    return {
-        "dataset_id": dataset_id,
-        "title": metas.get("title"),
-        "license": metas.get("license"),
-        "modified": str(metas.get("modified")),
-        "data_processed": str(metas.get("data_processed")),
-        "rows": len(df),
-        "downloaded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }
-
-
 async def download_datasets(ids: list[str], out_dir: Path) -> None:
-    from dotenv import load_dotenv
+    """Export UKPN datasets via ukpyn into one bronze snapshot (helpers shared in ods.py)."""
     from ukpyn import UKPNClient
 
-    load_dotenv()
-    if not os.getenv("UKPN_API_KEY"):
-        raise SystemExit("UKPN_API_KEY is not set. Set it in the environment (or a local .env).")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = out_dir / "_manifest.json"
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    ods.api_key("UKPN_API_KEY")  # fail early, with a clear message
+    manifest = ods.Manifest(out_dir)
     async with UKPNClient(timeout=300) as client:
-        for dataset_id in ids:
-            print(f"Downloading {dataset_id} ...")
-            manifest[dataset_id] = await _download_one(client, dataset_id, out_dir)
-            manifest_path.write_text(json.dumps(manifest, indent=2))
+        for ds in ids:
+            print(f"Downloading {ds} ...")
+            meta = await ods.with_retry(f"{ds} meta", client.get_dataset, ds)
+            metas = (meta.model_dump().get("metas") or {}).get("default") or {}
+            raw = await ods.with_retry(f"{ds} export", client.export_data, ds, format="json")
+            manifest.add(ods.save(pd.DataFrame(json.load(io.BytesIO(raw))), ds, metas, out_dir))
 
 
 # ----------------------------------------------------------------- helpers --
@@ -205,8 +151,25 @@ def match_gsp(name: str, area: str, overview: set[str]) -> str | None:
 # ----------------------------------------------------------------- adapter --
 
 
+INFO = DNOInfo(
+    code=DNO,
+    name="UK Power Networks",
+    region="London, the South East and the East of England",
+    licence_areas=("LPN", "SPN", "EPN"),
+    portal_name="UK Power Networks Open Data Portal",
+    portal_url="https://ukpowernetworks.opendatasoft.com/",
+    licence="CC BY 4.0",
+    licence_url="https://creativecommons.org/licenses/by/4.0/",
+    map_center=(0.35, 51.55),
+    map_zoom=7.6,
+    min_sites=900,
+    fallback_id_prefix="UKPN-MRID-",
+)
+
+
 class UKPNAdapter(DNOAdapter):
-    dno = "UKPN"
+    dno = DNO
+    info = INFO
     default_scenario = DEFAULT_SCENARIO
 
     def __init__(self, raw_dir: Path | None = None):

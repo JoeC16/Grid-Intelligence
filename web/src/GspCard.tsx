@@ -38,7 +38,7 @@ export default function GspCard({ gsp, onClose }: { gsp: GspRow; onClose: () => 
         <Row label="Import utilisation (peak / capacity)" value={fmt(gsp.import_capacity_utilisation_pct)} unit="%" />
         <p className="mt-3 text-[11px] leading-relaxed text-stone-500">
           GSPs publish no MW headroom. Stuck demand here is the sum over its bulk supply points and directly fed primaries.
-          "Running out" = the first year UKPN's DFES forecast (default scenario) puts a primary's published headroom below zero.
+          "Running out" = the first year the network operator's DFES forecast (default scenario) puts a primary's published headroom below zero.
           Open Sources &amp; licences for datasets and dates.
         </p>
       </div>

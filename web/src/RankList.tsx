@@ -34,7 +34,7 @@ function downloadCsv(filename: string, lines: string[]) {
 
 export default function RankList({ exportContext, title, subtitle, ranking, sites, visible, selectedId, onSelect, onClose }: Props) {
   const [shown, setShown] = useState(PAGE);
-  // Ranks are UKPN-wide; area/voltage filters only hide rows.
+  // Ranks are national (every network covered); area/voltage filters only hide rows.
   const rows = [...ranking.entries]
     .filter(([id]) => visible.has(id))
     .sort((a, b) => a[1].rank - b[1].rank || (sites.get(a[0])?.name ?? "").localeCompare(sites.get(b[0])?.name ?? ""));

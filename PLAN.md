@@ -146,10 +146,11 @@ What the data supports (checked):
 - No large demand list equivalent found yet.
 
 Part A — groundwork (no SPEN data needed):
-- [ ] Shared OpenDataSoft downloader (`pipeline/adapters/ods.py`): exports with retries and a manifest per snapshot, key from env; used by the SPEN adapter.
-- [ ] Multi-DNO everywhere: UI text and titles, filters by DNO and licence area, sources and attribution grouped per DNO, story and AI prompt worded for the networks covered, checks per DNO.
-- [ ] Scoring across all networks covered (percentiles across GB primaries, not per DNO), documented.
-- [ ] Cold start: precompute what the API loads so the first request after a quiet spell is fast.
+- [x] Shared OpenDataSoft downloader (`pipeline/adapters/ods.py`): exports with retries and a manifest per snapshot, key from env; used by the SPEN adapter.
+- [x] Multi-DNO everywhere: UI text and titles, filters by DNO and licence area, sources and attribution grouped per DNO, story and AI prompt worded for the networks covered, checks per DNO.
+- [x] Scoring across all networks covered (percentiles across GB primaries, not per DNO), documented.
+- [x] Cold start: precompute what the API loads so the first request after a quiet spell is fast.
+- Part A done: `adapters/ods.py` (UKPN's ukpyn download now shares its retry/flatten/manifest code); each adapter describes itself in a `DNOInfo` (name, region, areas, portal, licence, map view, check thresholds) written to a `dnos` table; the API, map attribution, footer, sources dialog, print report, Story and the Ask box's prompt and tools all read from it (no DNO named outside `adapters/`); a Network filter appears once there are two DNOs; checks run per DNO plus national ones (unique site IDs and GSP names); national ranking documented in docs/SCORING.md. Cold start: the function's own load is ~0.1 s, the wait was Python starting, so the start-up data (meta, sites, BSPs, GSPs, network, story) is now published as static JSON with the web app in `public/` (`backend/export_static.py`) and served from the CDN; only site detail and Ask call the function.
 
 Part B — SPEN adapter (needs SPEN_API_KEY):
 - [ ] Spike: download, profile, join test (heatmap ↔ NSHR ↔ LTDS ↔ Table 6 ↔ naming tables); add to docs/PROFILE.md.

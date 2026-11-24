@@ -108,7 +108,7 @@ def _args(**kw):
 def test_search_by_score_matches_map_ranking():
     out = assistant.search_sites(_load()["sites"], _args(rank_by="score", limit=3))
     first = out["results"][0]
-    assert first["name"] == "Bow 11kV" and first["result_rank"] == 1 and first["score_rank_ukpn"] == 1
+    assert first["name"] == "Bow 11kV" and first["result_rank"] == 1 and first["score_rank_all"] == 1
     assert out["total_matches"] == 959
 
 
@@ -308,3 +308,17 @@ def test_run_tool_dispatches_graph_tools_and_reports_unknown_site():
 
 def test_num_rounds_half_up_like_the_web_app():
     assert assistant._num(422.15) == 422.2 and assistant._num(-326.95) == -327.0 and assistant._num(None) is None
+
+
+def test_prompt_and_tools_name_every_network_covered():
+    dnos = [
+        {"code": "UKPN", "name": "UK Power Networks", "region": "the South East", "licence_areas": ["LPN", "SPN", "EPN"]},
+        {"code": "SPEN", "name": "SP Energy Networks", "region": "Merseyside and North Wales; central and southern Scotland",
+         "licence_areas": ["SPM", "SPD"]},
+    ]
+    prompt = assistant.system_prompt(dnos)
+    assert "UK Power Networks (UKPN)" in prompt and "SP Energy Networks (SPEN)" in prompt and "{coverage}" not in prompt
+    enums = [t["input_schema"]["properties"]["licence_areas"]["anyOf"][0]["items"]["enum"]
+             for t in assistant.tools_for(["LPN", "SPN", "EPN", "SPM", "SPD"])
+             if "licence_areas" in t["input_schema"]["properties"]]
+    assert enums and all(e == ["EPN", "LPN", "SPD", "SPM", "SPN"] for e in enums)

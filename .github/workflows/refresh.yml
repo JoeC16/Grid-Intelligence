@@ -101,6 +101,9 @@ jobs:
           npm ci
           npm run build
 
+      - name: Publish start-up data as static files (served from the CDN)
+        run: uv run python -m backend.export_static
+
       - name: Deploy to Vercel
         if: ${{ github.event_name == 'schedule' || inputs.deploy }}
         env:

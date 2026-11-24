@@ -58,6 +58,23 @@ Notes on the formulas:
 
 Stored as `site_scores.score` and `site_scores.rank`.
 
+### One national ranking across network operators
+
+When more than one DNO is loaded, percentiles are taken across **every
+scorable primary from every DNO together**, not per DNO. A score of 90 means
+"more stuck than 90% of the primaries covered", wherever they are, so a
+Glasgow primary and a London primary can be compared directly. Filtering the
+map to one network only hides rows; it doesn't re-rank. (`pipeline/run.py`
+scores the combined table; the browser re-scores the same way.)
+
+The caveat: the signals have to mean the same thing at each DNO. The DNOs
+publish the same standard heatmap fields (firm capacity, published headroom,
+offers made and accepted), but the queue and 2030 headroom come from each
+DNO's own LTDS and DFES/NSHR datasets, and their DFES scenarios have different
+names. Each adapter's notes in docs/PROFILE.md say how its fields were mapped,
+and any signal a DNO doesn't publish is left missing (weights re-normalised, as
+above) rather than filled in.
+
 ### Known limitation: big boards still rank mid-table
 
 The new signals were meant to lift big boards with a lot of stuck demand.
