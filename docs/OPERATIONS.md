@@ -12,6 +12,7 @@ layers see [DATA_MODEL.md](DATA_MODEL.md); for the scoring see [SCORING.md](SCOR
 | Bronze snapshots | GitHub releases `snapshot-ukpn-<date>` (asset `bronze-ukpn-<date>.tar.gz`), never git |
 | Refresh + deploy | GitHub Actions: `.github/workflows/refresh.yml` (weekly, Mondays 05:17 UTC, and on demand) |
 | CI | `.github/workflows/ci.yml` on every pull request and push to `main` |
+| Git-triggered Vercel builds | **Off** (`vercel.json` → `git.deploymentEnabled: false`). The repo is linked to Vercel, but a build from git has no data (`data/` is never committed), so only the CLI / refresh workflow deploys. |
 
 ## One-time setup (repository owner)
 
