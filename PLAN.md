@@ -180,3 +180,21 @@ Plan:
 - Done when: Spain shows on the map with scores, a distributor ranking and sources, and its checks pass.
 - Phase 13 done (2026-11-24): `adapters/cnmc_es.py` reads the CNMC demand layers (6,182 busbars, 59 distributors, October 2026); licence CC BY-SA 4.0 per CNMC|Data terms (recorded in README, flagged for legal review); scores and ranks per country; "Nudo 0" busbars (408, undefined in the data) shown but not scored; utilisation = taken / (taken + published headroom); `gold.operator_mart` + `/operators` + Distributors panel (sortable, CSV); Country switch, Spain filters (distributors, voltage bands), Spain side panel; six Spain story chapters incl. "Around La Barona" (config/story.yaml); Ask box: country filter, Spanish municipality lookup, Spain prompt; checks per DNO (bbox, scorable share, topology checks only where published); refresh stores a bronze archive per DNO. Transmission (Red Eléctrica) layer kept in bronze, not shown yet.
 
+
+## Phase 14 — Spain network view: distribution busbars → transmission nodes
+Why: GB has a GSP → BSP → primary tree; Spain shows busbars only. The CNMC data does publish the link upward, just not in the demand layer.
+
+What the data supports (checked 2026-11-24):
+- The CNMC **generation** capacity layer (`Generacion_en_Distribucion` layer 4, 6,227 busbars) has `NUDO_AFECCION_RDT`: for each distribution busbar, the transmission node of majority influence, as named by its operator. 98.6% filled (537 distinct nodes); the gaps are small distributors.
+- 99.6% of demand busbars join to a generation row on operator + substation + voltage.
+- 85% of node names match a Red Eléctrica busbar in the transmission demand layer after cleanup (case, accents, "KV", brackets). The rest: abbreviations ("P.G.R."), two nodes in one cell, "NO APLICA".
+- The transmission layer gives demand capacity per node by evaluation criterion (CEP CAD1/CAD2, no-CEP), occupied, admitted not evaluated, and free bays. 60% of transmission busbars show 0 MW for new demand (e.g. LA PLANA 220 above Vall d'Alba, COSLADA 220).
+- Caveat: the link is published for generation access ("afección" for generation); it is the operator's own statement of which transmission node a busbar depends on, not a full feeder map. Labelled as such.
+
+Plan:
+- [ ] Read the CNMC transmission demand spec (BOE-A-2025-25253) to label the CEP/CAD criteria correctly; pick the figure shown as "published transmission demand capacity".
+- [ ] Bronze: add the generation layer to `adapters/cnmc_es.py`; `fetch_topology` returns transmission nodes as the upper level (like BSPs) and busbar → node links. Unmatched names kept as published, flagged, no line drawn; never guessed.
+- [ ] Graph: effective headroom for Spain = min(busbar headroom after its queue, transmission node capacity after the queue of every busbar under it); limiting level "busbar" or "transmission".
+- [ ] Network view for Spain (busbars → transmission nodes, coloured like GB's), node cards, the side panel Upstream section, "Rank by transmission nodes", Spain story chapter on upstream limits (incl. La Barona → LA PLANA 220).
+- [ ] Checks: share linked, share of node names matched; tests with small fixtures.
+- Done when: Spain's Network button draws the busbar → transmission tree with sources, and the checks pass.
