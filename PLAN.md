@@ -135,3 +135,24 @@ Make it safe and repeatable to put in front of paying users: nothing open to abu
 - [x] Merge to main and deploy from main (PR #1; git-triggered Vercel builds switched off so only data-bearing deploys reach production).
 - [x] docs/OPERATIONS.md: secrets, the refresh workflow, how to deploy, roll back, and what to do when a check fails.
 - Done when: the Ask box can't be used without a code, a refresh can run end to end without this session, checks gate the deploy, and the code is on main.
+
+## Phase 12 — Second network operator: SP Energy Networks
+Turn "a UKPN tool" into a GB product. SP Energy Networks (SPEN) is the second operator: it covers central and southern Scotland (SPD) and Merseyside & North Wales (SPM).
+
+What the data supports (checked):
+- SPEN publishes on the same platform as UKPN (OpenDataSoft), CC BY 4.0, and needs an API key for records (catalogue public, records behind login, like UKPN).
+- It publishes the same standardised **Capacity Heatmap** as UKPN (`distribution-capacity-heatmaps-spd`, 390 rows; `-spm`, 871 rows) with the same core fields: name, voltage, GSP, BSP, lat/lon, demand firm capacity, maximum, available capacity, demand offers made/accepted and budget estimates.
+- Also: Network Scenario Headroom Reports (`spd-nshr-data-workbook`, `spm-nshr-data-workbook`), LTDS Table 3 system loads, Table 6 connection activity, substation naming tables, a GSP queue (`gsp-queue-position`).
+- No large demand list equivalent found yet.
+
+Part A — groundwork (no SPEN data needed):
+- [ ] Shared OpenDataSoft downloader (`pipeline/adapters/ods.py`): exports with retries and a manifest per snapshot, key from env; used by the SPEN adapter.
+- [ ] Multi-DNO everywhere: UI text and titles, filters by DNO and licence area, sources and attribution grouped per DNO, story and AI prompt worded for the networks covered, checks per DNO.
+- [ ] Scoring across all networks covered (percentiles across GB primaries, not per DNO), documented.
+- [ ] Cold start: precompute what the API loads so the first request after a quiet spell is fast.
+
+Part B — SPEN adapter (needs SPEN_API_KEY):
+- [ ] Spike: download, profile, join test (heatmap ↔ NSHR ↔ LTDS ↔ Table 6 ↔ naming tables); add to docs/PROFILE.md.
+- [ ] `adapters/spen.py` implementing DNOAdapter: sites and headroom from the heatmap, queue from Table 6 / heatmap activity, 2030 headroom from the NSHR, topology from the heatmap's GSP/BSP fields.
+- [ ] Run both adapters; checks per DNO; deploy.
+- Done when: SPEN sites appear on the map with the same signals, sources and upstream view as UKPN, and the checks pass for both.
